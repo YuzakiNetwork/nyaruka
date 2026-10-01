@@ -109,30 +109,7 @@ let handler = async (m, { args, command, sock }) => {
 
   // ── !removefile <path> ────────────────────────────────────────────────────
   if (command === 'removefile' || command === 'rmfile' || command === 'delfile') {
-    const inputPath = args.join(' ');
-    if (!inputPath) return m.reply(`Usage: *!removefile <path>*\nContoh: !removefile logs/old.log`);
-
-    let fp;
-    try { fp = safePath(inputPath, { rejectSymlinks: true }); } catch (e) { return m.reply(`🚫 ${e.message}`); }
-
-    if (fp === BOT_ROOT_REAL) return m.reply('🚫 Akses ditolak: tidak dapat menghapus direktori bot');
-
-    if (!fs.existsSync(fp)) return m.reply(`❌ File tidak ditemukan: \`${inputPath}\``);
-
-    const stat = fs.statSync(fp);
-    const isDir = stat.isDirectory();
-
-    try {
-      fs.rmSync(fp, { recursive: true, force: true });
-      logger.warn({ path: fp, isDir }, '🗑️  File removed by owner');
-      return m.reply(
-        `✅ *Berhasil dihapus!*\n\n` +
-        `📄 ${isDir ? 'Folder' : 'File'}: \`${inputPath}\`\n` +
-        `📦 Ukuran: ${fmtSize(stat.size)}`
-      );
-    } catch (err) {
-      return m.reply(`❌ Gagal hapus: ${err.message}`);
-    }
+    return m.reply('🚫 Perintah removefile sementara dinonaktifkan demi keamanan; tidak ada file yang diubah.');
   }
 
   // ── !savefile <path> <konten> ─────────────────────────────────────────────

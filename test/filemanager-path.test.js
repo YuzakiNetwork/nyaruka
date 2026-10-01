@@ -85,7 +85,7 @@ test('does not disclose external target size when listing a symlink', async () =
   }
 });
 
-test('refuses to remove an internal symlink and preserves its target', async () => {
+test('preserves an internal symlink target while removefile is disabled', async () => {
   const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-remove-test-'));
   try {
     const targetDirectory = path.join(testDirectory, 'target');
@@ -94,19 +94,19 @@ test('refuses to remove an internal symlink and preserves its target', async () 
     fs.symlinkSync(targetDirectory, path.join(testDirectory, 'target-link'), 'dir');
 
     const reply = await removeFileReply(path.relative(BOT_ROOT, path.join(testDirectory, 'target-link')));
-    assert.match(reply, /symlink tidak dapat dihapus/);
+    assert.match(reply, /removefile sementara dinonaktifkan/);
     assert.equal(fs.readFileSync(path.join(targetDirectory, 'keep.txt'), 'utf8'), 'still here');
     assert.equal(fs.lstatSync(path.join(testDirectory, 'target-link')).isSymbolicLink(), true);
 
     const nestedReply = await removeFileReply(path.relative(BOT_ROOT, path.join(testDirectory, 'target-link', 'keep.txt')));
-    assert.match(nestedReply, /symlink tidak dapat dihapus/);
+    assert.match(nestedReply, /removefile sementara dinonaktifkan/);
     assert.equal(fs.readFileSync(path.join(targetDirectory, 'keep.txt'), 'utf8'), 'still here');
   } finally {
     fs.rmSync(testDirectory, { recursive: true, force: true });
   }
 });
 
-test('rejects bot-root deletion aliases without calling rmSync', async () => {
+test('refuses bot-root aliases without calling rmSync', async () => {
   const canonicalRoot = fs.realpathSync(BOT_ROOT);
   const aliases = [
     '.',
@@ -119,7 +119,7 @@ test('rejects bot-root deletion aliases without calling rmSync', async () => {
     fs.rmSync = (...args) => { rmCalls.push(args); };
     for (const alias of aliases) {
       const reply = await removeFileReply(alias);
-      assert.match(reply, /tidak dapat menghapus direktori bot/);
+      assert.match(reply, /removefile sementara dinonaktifkan/);
     }
     assert.equal(rmCalls.length, 0);
   } finally {
@@ -127,15 +127,28 @@ test('rejects bot-root deletion aliases without calling rmSync', async () => {
   }
 });
 
-test('still removes an ordinary in-root file', async () => {
+test('refuses ordinary in-root file deletion while removefile is disabled', async () => {
   const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-remove-file-test-'));
   const filePath = path.join(testDirectory, 'ordinary.txt');
   try {
     fs.writeFileSync(filePath, 'ordinary in-root file');
     const reply = await removeFileReply(path.relative(BOT_ROOT, filePath));
-    assert.match(reply, /Berhasil dihapus/);
-    assert.equal(fs.existsSync(filePath), false);
+    assert.match(reply, /removefile sementara dinonaktifkan/);
+    assert.equal(fs.existsSync(filePath), true);
   } finally {
     fs.rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test('removefile refuses before calling rmSync', async () => {
+  const originalRmSync = fs.rmSync;
+  const rmCalls = [];
+  try {
+    fs.rmSync = (...args) => { rmCalls.push(args); };
+    const reply = await removeFileReply('../target.txt');
+    assert.match(reply, /removefile sementara dinonaktifkan/);
+    assert.equal(rmCalls.length, 0);
+  } finally {
+    fs.rmSync = originalRmSync;
   }
 });
