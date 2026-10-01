@@ -17,6 +17,15 @@ async function getFileReply(inputPath) {
   return reply;
 }
 
+async function listFilesReply(inputPath) {
+  let reply;
+  await handler(
+    { reply: message => { reply = message; return message; } },
+    { args: [inputPath], command: 'listfiles', sock: {} }
+  );
+  return reply;
+}
+
 test('rejects parent-directory traversal', async () => {
   assert.match(await getFileReply('../package.json'), /Akses ditolak/);
 });
@@ -46,6 +55,23 @@ test('rejects a symlink that resolves outside the bot root', async () => {
     assert.doesNotMatch(reply, /must not be read/);
   } finally {
     fs.rmSync(linkDirectory, { recursive: true, force: true });
+    fs.rmSync(outsideDirectory, { recursive: true, force: true });
+  }
+});
+
+test('does not disclose external target size when listing a symlink', async () => {
+  const listingDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-list-test-'));
+  const outsideDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'nyaruka-filemanager-list-outside-'));
+  try {
+    const targetPath = path.join(outsideDirectory, 'large-target.bin');
+    fs.writeFileSync(targetPath, 'x'.repeat(4096));
+    fs.symlinkSync(targetPath, path.join(listingDirectory, 'external-link'));
+
+    const reply = await listFilesReply(path.relative(BOT_ROOT, listingDirectory));
+    assert.match(reply, /external-link/);
+    assert.doesNotMatch(reply, /4\.0 KB/);
+  } finally {
+    fs.rmSync(listingDirectory, { recursive: true, force: true });
     fs.rmSync(outsideDirectory, { recursive: true, force: true });
   }
 });

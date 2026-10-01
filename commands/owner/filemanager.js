@@ -206,7 +206,7 @@ let handler = async (m, { args, command, sock }) => {
       const lines = entries.slice(0, 50).map(e => {
         if (e.isDirectory()) return `📁 ${e.name}/`;
         try {
-          const s = fs.statSync(path.join(fp, e.name));
+          const s = fs.lstatSync(path.join(fp, e.name));
           return `📄 ${e.name} (${fmtSize(s.size)})`;
         } catch { return `📄 ${e.name}`; }
       });
