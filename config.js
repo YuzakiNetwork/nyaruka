@@ -1,6 +1,6 @@
 /**
  * config.js
- * Global configuration dengan MongoDB support
+ * Global configuration
  */
 
 import 'dotenv/config';
@@ -58,11 +58,7 @@ export const config = {
   },
 
   db: {
-    type: process.env.DB_TYPE || (process.env.MONGO_URI ? 'mongodb' : 'json'),
-    // MongoDB config
-    mongoUri:  process.env.MONGO_URI || '',
-    mongoDb:   process.env.MONGO_DB  || 'fuyune',
-    // JSON fallback (jika MongoDB off)
+    // JSON file-based storage
     path: process.env.DB_PATH || './data',
   },
 

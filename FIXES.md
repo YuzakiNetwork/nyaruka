@@ -1,13 +1,12 @@
 # Verified Source Corrections
 
-The attached archive already contains `readCollection`, `writeCollection`, `hasRecord`, and `config.economy`; their presence alone did not make the affected paths safe. The database router exposes collection operations asynchronously, while economy initialization and player existence checks were consuming those results synchronously. The fixes below align those call chains and record the limits of the available MongoDB adapter.
+The attached archive already contains `readCollection`, `writeCollection`, `hasRecord`, and `config.economy`; their presence alone did not make the affected paths safe. The database router exposes collection operations asynchronously, while economy initialization and player existence checks were consuming those results synchronously. The fixes below align those call chains and record the current limits of the database layer.
 
 ## Source changes
 
 - `lib/database/db.js` now awaits `hasRecord` and returns a boolean only after the adapter result resolves. `lib/game/player.js` and `commands/rpg/register.js` await existence checks; `createPlayer` also waits before deciding whether the record already exists.
 - `lib/game/economy.js` now loads and saves collections asynchronously. The startup caller in `index.js`, economy price/trade operations, world-event reads, quest generation, and their command handlers await those APIs instead of treating a Promise as an economy object or event.
-- MongoDB `writeCollection` now preserves each input map key as a document `_id` fallback (including economy items that only carry `itemId`) and clears the collection cache after replacement.
-- MongoDB connection credentials were removed from `config.js`. JSON is the default when no `MONGO_URI` is supplied, and `.env.example` now contains blank credential/recipient fields and selects JSON.
+- MongoDB support has been removed entirely: JSON (`lib/database/json.js`) is the only database backend. `config.js` no longer reads any database credentials, and `.env.example` contains no database credential fields.
 - Added the missing `config.cooldowns` defaults used by the shop and dungeon modules. This fixes their module-load failure while preserving the existing 3-second default when no override is set.
 - Repaired a misplaced closing delimiter in `lib/game/job.js`; the existing Summoner job branch is now part of `JOB_TREE`, and the module parses.
 
@@ -20,4 +19,4 @@ The attached archive already contains `readCollection`, `writeCollection`, `hasR
 
 ## MongoDB status
 
-**MongoDB mode was not tested.** The async collection and player-existence paths now await adapter results, and Mongo collection writes retain the source keys. However, other gameplay paths still call synchronous `getRecord`/`getAllRecords`; the current Mongo adapter's synchronous compatibility methods return cache-only or empty results. Full RPG behavior on MongoDB is therefore not verified and should not be assumed until those remaining call sites are migrated. JSON mode is the tested configuration. Supply Mongo credentials only through `MONGO_URI` in the local environment; no credentials are included in this source package.
+The MongoDB adapter (`lib/database/mongodb.js`), the `scripts/migrate-to-mongo.js` migration tool, the `mongodb` npm dependency, and all related configuration (`DB_TYPE`, `MONGO_URI`, `MONGO_DB`) have been removed from the codebase. JSON file storage (`lib/database/json.js`) is now the only available database backend and the only one ever verified end-to-end. Any future database backend (e.g. Postgres/Supabase) will be added through the existing router in `lib/database/db.js`.

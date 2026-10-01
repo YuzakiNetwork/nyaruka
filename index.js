@@ -79,7 +79,7 @@ function validateSession() {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 async function start() {
-  // Initialize database (MongoDB or JSON)
+  // Initialize database (JSON file-based)
   try {
     await initDatabase();
   } catch (err) {
