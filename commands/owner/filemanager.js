@@ -1,28 +1,23 @@
 /**
  * commands/owner/filemanager.js
- * Owner file management — remove, save, get file di server.
+ * Owner file management — temporarily read-only due to path-based TOCTOU risk.
  *
  * Usage:
- *   !removefile <path>              → hapus file/folder di server
- *   !savefile <path> <isi>          → buat/timpa file dengan konten
  *   !getfile <path>                 → kirim konten file sebagai pesan
  *   !listfiles [path]               → list isi direktori
- *   !appendfile <path> <isi>        → append ke file yang ada
- *   !movefile <from> <to>           → rename/pindah file
  *   !statfile <path>                → info file (size, modified, dll)
  */
 
 import fs   from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { logger } from '../../lib/utils/logger.js';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
 const BOT_ROOT   = path.resolve(__dirname, '../..');
 const BOT_ROOT_REAL = fs.realpathSync(BOT_ROOT);
 
 // Batasi akses hanya dalam direktori bot (keamanan)
-function safePath(inputPath, { rejectSymlinks = false } = {}) {
+function safePath(inputPath) {
   let normalizedInput;
   try {
     normalizedInput = path.normalize(decodeURIComponent(inputPath));
@@ -42,22 +37,6 @@ function safePath(inputPath, { rejectSymlinks = false } = {}) {
 
   if (!isWithinRoot(resolved)) {
     throw new Error(`Akses ditolak: path di luar direktori bot`);
-  }
-
-  if (rejectSymlinks) {
-    let checkedPath = BOT_ROOT_REAL;
-    const components = path.relative(BOT_ROOT_REAL, resolved).split(path.sep).filter(Boolean);
-    for (const component of components) {
-      checkedPath = path.join(checkedPath, component);
-      try {
-        if (fs.lstatSync(checkedPath).isSymbolicLink()) {
-          throw new Error('Akses ditolak: symlink tidak dapat dihapus');
-        }
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-        break;
-      }
-    }
   }
 
   // Resolve existing symlinks, including the nearest existing parent for new files.
@@ -114,36 +93,7 @@ let handler = async (m, { args, command, sock }) => {
 
   // ── !savefile <path> <konten> ─────────────────────────────────────────────
   if (command === 'savefile' || command === 'writefile' || command === 'mkfile') {
-    // Format: !savefile path/to/file.js konten...
-    if (args.length < 2) return m.reply(
-      `Usage: *!savefile <path> <konten>*\n` +
-      `Contoh: !savefile test/hello.txt Hello World!`
-    );
-
-    const filePath = args[0];
-    const content  = args.slice(1).join(' ')
-      // Support \\n sebagai newline
-      .replace(/\\n/g, '\n')
-      // Support code block dari WA (strip backticks)
-      .replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '');
-
-    let fp;
-    try { fp = safePath(filePath); } catch (e) { return m.reply(`🚫 ${e.message}`); }
-
-    try {
-      // Buat direktori jika belum ada
-      fs.mkdirSync(path.dirname(fp), { recursive: true });
-      fs.writeFileSync(fp, content, 'utf8');
-      logger.info({ path: fp, bytes: content.length }, '💾 File saved by owner');
-      return m.reply(
-        `✅ *File disimpan!*\n\n` +
-        `📄 Path: \`${filePath}\`\n` +
-        `📦 Size: ${fmtSize(Buffer.byteLength(content))}\n` +
-        `📝 Lines: ${content.split('\n').length}`
-      );
-    } catch (err) {
-      return m.reply(`❌ Gagal simpan: ${err.message}`);
-    }
+    return m.reply('🚫 File manager sementara hanya-baca; operasi tulis file dinonaktifkan demi keamanan.');
   }
 
   // ── !getfile <path> ───────────────────────────────────────────────────────
@@ -219,43 +169,12 @@ let handler = async (m, { args, command, sock }) => {
 
   // ── !appendfile <path> <konten> ───────────────────────────────────────────
   if (command === 'appendfile') {
-    if (args.length < 2) return m.reply(`Usage: *!appendfile <path> <konten>*`);
-    const filePath = args[0];
-    const content  = '\n' + args.slice(1).join(' ').replace(/\\n/g, '\n');
-
-    let fp;
-    try { fp = safePath(filePath); } catch (e) { return m.reply(`🚫 ${e.message}`); }
-
-    try {
-      fs.mkdirSync(path.dirname(fp), { recursive: true });
-      fs.appendFileSync(fp, content, 'utf8');
-      const size = fs.statSync(fp).size;
-      return m.reply(`✅ Appended ke \`${filePath}\` | Total size: ${fmtSize(size)}`);
-    } catch (err) {
-      return m.reply(`❌ Gagal append: ${err.message}`);
-    }
+    return m.reply('🚫 File manager sementara hanya-baca; operasi tulis file dinonaktifkan demi keamanan.');
   }
 
   // ── !movefile <from> <to> ─────────────────────────────────────────────────
   if (command === 'movefile' || command === 'mvfile') {
-    if (args.length < 2) return m.reply(`Usage: *!movefile <from> <to>*`);
-    const [from, to] = [args[0], args[1]];
-
-    let fpFrom, fpTo;
-    try {
-      fpFrom = safePath(from);
-      fpTo   = safePath(to);
-    } catch (e) { return m.reply(`🚫 ${e.message}`); }
-
-    if (!fs.existsSync(fpFrom)) return m.reply(`❌ File tidak ditemukan: \`${from}\``);
-
-    try {
-      fs.mkdirSync(path.dirname(fpTo), { recursive: true });
-      fs.renameSync(fpFrom, fpTo);
-      return m.reply(`✅ Pindah: \`${from}\` → \`${to}\``);
-    } catch (err) {
-      return m.reply(`❌ Gagal pindah: ${err.message}`);
-    }
+    return m.reply('🚫 File manager sementara hanya-baca; operasi pindah file dinonaktifkan demi keamanan.');
   }
 
   // ── !statfile <path> ──────────────────────────────────────────────────────
@@ -282,12 +201,8 @@ let handler = async (m, { args, command, sock }) => {
 };
 
 handler.help      = [
-  'removefile <path>',
-  'savefile <path> <konten>',
   'getfile <path>',
   'listfiles [path]',
-  'appendfile <path> <konten>',
-  'movefile <from> <to>',
   'statfile <path>',
 ];
 handler.tags      = ['owner'];

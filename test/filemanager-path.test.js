@@ -35,6 +35,33 @@ async function removeFileReply(inputPath) {
   return reply;
 }
 
+async function commandReply(command, args) {
+  let reply;
+  await handler(
+    { reply: message => { reply = message; return message; } },
+    { args, command, sock: {} }
+  );
+  return reply;
+}
+
+function interceptFileMutations() {
+  const names = ['mkdirSync', 'writeFileSync', 'appendFileSync', 'renameSync'];
+  const originals = new Map(names.map(name => [name, fs[name]]));
+  const calls = [];
+  for (const name of names) {
+    fs[name] = (...args) => {
+      calls.push({ name, args });
+      throw new Error(`Unexpected filesystem mutation: ${name}`);
+    };
+  }
+  return {
+    calls,
+    restore() {
+      for (const [name, original] of originals) fs[name] = original;
+    }
+  };
+}
+
 test('rejects parent-directory traversal', async () => {
   assert.match(await getFileReply('../package.json'), /Akses ditolak/);
 });
@@ -151,4 +178,76 @@ test('removefile refuses before calling rmSync', async () => {
   } finally {
     fs.rmSync = originalRmSync;
   }
+});
+
+test('refuses savefile, writefile, and mkfile without mutations', async () => {
+  const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-save-disabled-'));
+  const fixturePath = path.join(testDirectory, 'fixture.txt');
+  try {
+    fs.writeFileSync(fixturePath, 'original save fixture');
+    const relativePath = path.relative(BOT_ROOT, fixturePath);
+    const mutations = interceptFileMutations();
+    try {
+      for (const alias of ['savefile', 'writefile', 'mkfile']) {
+        const reply = await commandReply(alias, [relativePath, 'replacement']);
+        assert.match(reply, /file manager sementara hanya-baca/i);
+      }
+      assert.deepEqual(mutations.calls, []);
+    } finally {
+      mutations.restore();
+    }
+    assert.equal(fs.readFileSync(fixturePath, 'utf8'), 'original save fixture');
+  } finally {
+    fs.rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test('refuses appendfile without mutations', async () => {
+  const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-append-disabled-'));
+  const fixturePath = path.join(testDirectory, 'fixture.txt');
+  try {
+    fs.writeFileSync(fixturePath, 'original append fixture');
+    const relativePath = path.relative(BOT_ROOT, fixturePath);
+    const mutations = interceptFileMutations();
+    try {
+      const reply = await commandReply('appendfile', [relativePath, 'appended']);
+      assert.match(reply, /file manager sementara hanya-baca/i);
+      assert.deepEqual(mutations.calls, []);
+    } finally {
+      mutations.restore();
+    }
+    assert.equal(fs.readFileSync(fixturePath, 'utf8'), 'original append fixture');
+  } finally {
+    fs.rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test('refuses movefile and mvfile without mutations', async () => {
+  const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-move-disabled-'));
+  const sourcePath = path.join(testDirectory, 'source.txt');
+  const destinationPath = path.join(testDirectory, 'destination.txt');
+  try {
+    fs.writeFileSync(sourcePath, 'original source fixture');
+    fs.writeFileSync(destinationPath, 'original destination fixture');
+    const source = path.relative(BOT_ROOT, sourcePath);
+    const destination = path.relative(BOT_ROOT, destinationPath);
+    const mutations = interceptFileMutations();
+    try {
+      for (const alias of ['movefile', 'mvfile']) {
+        const reply = await commandReply(alias, [source, destination]);
+        assert.match(reply, /file manager sementara hanya-baca/i);
+      }
+      assert.deepEqual(mutations.calls, []);
+    } finally {
+      mutations.restore();
+    }
+    assert.equal(fs.readFileSync(sourcePath, 'utf8'), 'original source fixture');
+    assert.equal(fs.readFileSync(destinationPath, 'utf8'), 'original destination fixture');
+  } finally {
+    fs.rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test('help advertises only read-only file-manager commands', () => {
+  assert.deepEqual(handler.help, ['getfile <path>', 'listfiles [path]', 'statfile <path>']);
 });
