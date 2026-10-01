@@ -106,6 +106,27 @@ test('refuses to remove an internal symlink and preserves its target', async () 
   }
 });
 
+test('rejects bot-root deletion aliases without calling rmSync', async () => {
+  const canonicalRoot = fs.realpathSync(BOT_ROOT);
+  const aliases = [
+    '.',
+    canonicalRoot,
+    `${canonicalRoot}/commands/owner/../..`
+  ];
+  const originalRmSync = fs.rmSync;
+  const rmCalls = [];
+  try {
+    fs.rmSync = (...args) => { rmCalls.push(args); };
+    for (const alias of aliases) {
+      const reply = await removeFileReply(alias);
+      assert.match(reply, /tidak dapat menghapus direktori bot/);
+    }
+    assert.equal(rmCalls.length, 0);
+  } finally {
+    fs.rmSync = originalRmSync;
+  }
+});
+
 test('still removes an ordinary in-root file', async () => {
   const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-remove-file-test-'));
   const filePath = path.join(testDirectory, 'ordinary.txt');

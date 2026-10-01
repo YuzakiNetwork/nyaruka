@@ -115,6 +115,8 @@ let handler = async (m, { args, command, sock }) => {
     let fp;
     try { fp = safePath(inputPath, { rejectSymlinks: true }); } catch (e) { return m.reply(`🚫 ${e.message}`); }
 
+    if (fp === BOT_ROOT_REAL) return m.reply('🚫 Akses ditolak: tidak dapat menghapus direktori bot');
+
     if (!fs.existsSync(fp)) return m.reply(`❌ File tidak ditemukan: \`${inputPath}\``);
 
     const stat = fs.statSync(fp);
