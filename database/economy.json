@@ -1,0 +1,434 @@
+{
+  "iron_sword": {
+    "itemId": "iron_sword",
+    "basePrice": 120,
+    "currentPrice": 120,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      120,
+      120,
+      120,
+      120,
+      120
+    ]
+  },
+  "flame_blade": {
+    "itemId": "flame_blade",
+    "basePrice": 1350,
+    "currentPrice": 1350,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      1350,
+      1350,
+      1350,
+      1350,
+      1350
+    ]
+  },
+  "shadow_fang": {
+    "itemId": "shadow_fang",
+    "basePrice": 9600,
+    "currentPrice": 9600,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.35,
+    "lastUpdated": 1790845200500,
+    "history": [
+      9600,
+      9600,
+      9600,
+      9600,
+      9600
+    ]
+  },
+  "storm_bow": {
+    "itemId": "storm_bow",
+    "basePrice": 1200,
+    "currentPrice": 1200,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      1200,
+      1200,
+      1200,
+      1200,
+      1200
+    ]
+  },
+  "arcane_staff": {
+    "itemId": "arcane_staff",
+    "basePrice": 1440,
+    "currentPrice": 1440,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      1440,
+      1440,
+      1440,
+      1440,
+      1440
+    ]
+  },
+  "void_scythe": {
+    "itemId": "void_scythe",
+    "basePrice": 125000,
+    "currentPrice": 125000,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.6,
+    "lastUpdated": 1790845200500,
+    "history": [
+      125000,
+      125000,
+      125000,
+      125000,
+      125000
+    ]
+  },
+  "gods_edge": {
+    "itemId": "gods_edge",
+    "basePrice": 5000000,
+    "currentPrice": 5000000,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.9,
+    "lastUpdated": 1790845200500,
+    "history": [
+      5000000,
+      5000000,
+      5000000,
+      5000000,
+      5000000
+    ]
+  },
+  "leather_vest": {
+    "itemId": "leather_vest",
+    "basePrice": 80,
+    "currentPrice": 80,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      80,
+      80,
+      80,
+      80,
+      80
+    ]
+  },
+  "iron_plate": {
+    "itemId": "iron_plate",
+    "basePrice": 150,
+    "currentPrice": 150,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      150,
+      150,
+      150,
+      150,
+      150
+    ]
+  },
+  "mage_robe": {
+    "itemId": "mage_robe",
+    "basePrice": 1080,
+    "currentPrice": 1080,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      1080,
+      1080,
+      1080,
+      1080,
+      1080
+    ]
+  },
+  "dragon_scale": {
+    "itemId": "dragon_scale",
+    "basePrice": 17600,
+    "currentPrice": 17600,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.35,
+    "lastUpdated": 1790845200500,
+    "history": [
+      17600,
+      17600,
+      17600,
+      17600,
+      17600
+    ]
+  },
+  "void_plate": {
+    "itemId": "void_plate",
+    "basePrice": 150000,
+    "currentPrice": 150000,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.6,
+    "lastUpdated": 1790845200500,
+    "history": [
+      150000,
+      150000,
+      150000,
+      150000,
+      150000
+    ]
+  },
+  "iron_helm": {
+    "itemId": "iron_helm",
+    "basePrice": 90,
+    "currentPrice": 90,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      90,
+      90,
+      90,
+      90,
+      90
+    ]
+  },
+  "crown_of_wisdom": {
+    "itemId": "crown_of_wisdom",
+    "basePrice": 14400,
+    "currentPrice": 14400,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.35,
+    "lastUpdated": 1790845200500,
+    "history": [
+      14400,
+      14400,
+      14400,
+      14400,
+      14400
+    ]
+  },
+  "health_ring": {
+    "itemId": "health_ring",
+    "basePrice": 100,
+    "currentPrice": 100,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      100,
+      100,
+      100,
+      100,
+      100
+    ]
+  },
+  "swift_amulet": {
+    "itemId": "swift_amulet",
+    "basePrice": 960,
+    "currentPrice": 960,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      960,
+      960,
+      960,
+      960,
+      960
+    ]
+  },
+  "dragon_eye": {
+    "itemId": "dragon_eye",
+    "basePrice": 200000,
+    "currentPrice": 200000,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.6,
+    "lastUpdated": 1790845200500,
+    "history": [
+      200000,
+      200000,
+      200000,
+      200000,
+      200000
+    ]
+  },
+  "health_potion": {
+    "itemId": "health_potion",
+    "basePrice": 50,
+    "currentPrice": 50,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      50,
+      50,
+      50,
+      50,
+      50
+    ]
+  },
+  "mega_potion": {
+    "itemId": "mega_potion",
+    "basePrice": 540,
+    "currentPrice": 540,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      540,
+      540,
+      540,
+      540,
+      540
+    ]
+  },
+  "mana_elixir": {
+    "itemId": "mana_elixir",
+    "basePrice": 450,
+    "currentPrice": 450,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      450,
+      450,
+      450,
+      450,
+      450
+    ]
+  },
+  "elixir_of_power": {
+    "itemId": "elixir_of_power",
+    "basePrice": 4800,
+    "currentPrice": 4800,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.35,
+    "lastUpdated": 1790845200500,
+    "history": [
+      4800,
+      4800,
+      4800,
+      4800,
+      4800
+    ]
+  },
+  "antidote": {
+    "itemId": "antidote",
+    "basePrice": 40,
+    "currentPrice": 40,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      40,
+      40,
+      40,
+      40,
+      40
+    ]
+  },
+  "wolf_fang": {
+    "itemId": "wolf_fang",
+    "basePrice": 25,
+    "currentPrice": 25,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.08,
+    "lastUpdated": 1790845200500,
+    "history": [
+      25,
+      25,
+      25,
+      25,
+      25
+    ]
+  },
+  "dragon_scale_mat": {
+    "itemId": "dragon_scale_mat",
+    "basePrice": 6400,
+    "currentPrice": 6400,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.35,
+    "lastUpdated": 1790845200500,
+    "history": [
+      6400,
+      6400,
+      6400,
+      6400,
+      6400
+    ]
+  },
+  "void_crystal": {
+    "itemId": "void_crystal",
+    "basePrice": 75000,
+    "currentPrice": 75000,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.6,
+    "lastUpdated": 1790845200500,
+    "history": [
+      75000,
+      75000,
+      75000,
+      75000,
+      75000
+    ]
+  },
+  "ancient_rune": {
+    "itemId": "ancient_rune",
+    "basePrice": 600,
+    "currentPrice": 600,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      600,
+      600,
+      600,
+      600,
+      600
+    ]
+  },
+  "monster_core": {
+    "itemId": "monster_core",
+    "basePrice": 450,
+    "currentPrice": 450,
+    "demand": 1,
+    "supply": 1,
+    "volatility": 0.18,
+    "lastUpdated": 1790845200500,
+    "history": [
+      450,
+      450,
+      450,
+      450,
+      450
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "whatsapp-rpg-bot",
+  "version": "2.0.0",
+  "description": "WhatsApp Fantasy RPG Bot — MongoDB + Multi-Prefix + Hardmode",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start":        "node index.js",
+    "dev":          "nodemon index.js",
+    "pm2":          "pm2 start ecosystem.config.js",
+    "pm2:stop":     "pm2 stop rpg-bot",
+    "pm2:restart":  "pm2 restart rpg-bot",
+    "pm2:logs":     "pm2 logs rpg-bot",
+    "db:migrate":   "node scripts/migrate-to-mongo.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "dotenv":           "^16.4.5",
+    "mongodb":          "^6.3.0",
+    "pino":             "^9.1.0",
+    "pino-pretty":      "^11.0.0",
+    "qrcode-terminal":  "^0.12.0",
+    "node-cron":        "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": ["whatsapp", "bot", "rpg", "baileys", "mongodb", "anti-spam"],
+  "author": "RPG Bot Team",
+  "license": "MIT"
+}
