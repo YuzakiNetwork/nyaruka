@@ -14,6 +14,48 @@ after(() => {
   fs.rmSync(testRoot, { recursive: true, force: true });
 });
 
+async function assertBackupFailurePreservesState(collection, sourceMode, method) {
+  const filepath = path.join(dbDirectory, `${collection}.json`);
+  const backupPath = `${filepath}.bak`;
+  await jsonDb.setRecord(collection, 'entry', { version: 1 });
+  fs.chmodSync(filepath, sourceMode);
+  const previousContents = fs.readFileSync(filepath, 'utf-8');
+  const originalMethod = fs[method];
+  const failure = new Error(`simulated backup ${method} failure`);
+  failure.code = 'EIO';
+  let injectedFailure = false;
+
+  fs[method] = function (source, destination) {
+    const isBackupOperation = method === 'copyFileSync'
+      ? destination.startsWith(`${filepath}.bak.`) && destination.endsWith('.tmp')
+      : destination === backupPath;
+    if (!injectedFailure && isBackupOperation) {
+      injectedFailure = true;
+      throw failure;
+    }
+    return originalMethod.call(fs, source, destination);
+  };
+
+  try {
+    await assert.rejects(
+      jsonDb.setRecord(collection, 'entry', { version: 2 }),
+      (error) => error === failure,
+    );
+  } finally {
+    fs[method] = originalMethod;
+  }
+
+  assert.equal(injectedFailure, true);
+  assert.equal(fs.readFileSync(filepath, 'utf-8'), previousContents);
+  assert.equal(fs.statSync(filepath).mode & 0o777, sourceMode);
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.deepEqual(jsonDb.getRecord(collection, 'entry'), { version: 1 });
+  assert.deepEqual(
+    fs.readdirSync(dbDirectory).filter((name) => name.startsWith(`${collection}.json.`) && name.endsWith('.tmp')),
+    [],
+  );
+}
+
 test('writes collection JSON and returns success', () => {
   assert.equal(jsonDb.writeCollection('atomic-new', { value: 'first' }), true);
   assert.deepEqual(
@@ -54,6 +96,37 @@ test('preserves existing permissions and creates new files as owner-only', () =>
   } finally {
     process.umask(permissiveUmask);
   }
+});
+
+test('backup permissions are no broader than 0600 and 0640 source files', async () => {
+  const previousUmask = process.umask(0o000);
+  try {
+    for (const sourceMode of [0o600, 0o640]) {
+      const collection = `atomic-backup-mode-${sourceMode.toString(8)}`;
+      const filepath = path.join(dbDirectory, `${collection}.json`);
+      await jsonDb.setRecord(collection, 'entry', { version: 1 });
+      fs.chmodSync(filepath, sourceMode);
+      const previousContents = fs.readFileSync(filepath, 'utf-8');
+
+      await jsonDb.setRecord(collection, 'entry', { version: 2 });
+
+      const backupPath = `${filepath}.bak`;
+      const backupMode = fs.statSync(backupPath).mode & 0o777;
+      assert.equal(fs.readFileSync(backupPath, 'utf-8'), previousContents);
+      assert.equal(backupMode & ~sourceMode, 0);
+      assert.equal(fs.statSync(filepath).mode & 0o777, sourceMode);
+    }
+  } finally {
+    process.umask(previousUmask);
+  }
+});
+
+test('backup-copy failure preserves the original, cache, and temp-file cleanup', async () => {
+  await assertBackupFailurePreservesState('atomic-backup-copy-failure', 0o600, 'copyFileSync');
+});
+
+test('backup-rename failure preserves the original, cache, and temp-file cleanup', async () => {
+  await assertBackupFailurePreservesState('atomic-backup-rename-failure', 0o640, 'renameSync');
 });
 
 test('isolates nested values at read and write boundaries', () => {
