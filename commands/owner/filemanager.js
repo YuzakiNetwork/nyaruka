@@ -22,7 +22,7 @@ const BOT_ROOT   = path.resolve(__dirname, '../..');
 const BOT_ROOT_REAL = fs.realpathSync(BOT_ROOT);
 
 // Batasi akses hanya dalam direktori bot (keamanan)
-function safePath(inputPath) {
+function safePath(inputPath, { rejectSymlinks = false } = {}) {
   let normalizedInput;
   try {
     normalizedInput = path.normalize(decodeURIComponent(inputPath));
@@ -42,6 +42,22 @@ function safePath(inputPath) {
 
   if (!isWithinRoot(resolved)) {
     throw new Error(`Akses ditolak: path di luar direktori bot`);
+  }
+
+  if (rejectSymlinks) {
+    let checkedPath = BOT_ROOT_REAL;
+    const components = path.relative(BOT_ROOT_REAL, resolved).split(path.sep).filter(Boolean);
+    for (const component of components) {
+      checkedPath = path.join(checkedPath, component);
+      try {
+        if (fs.lstatSync(checkedPath).isSymbolicLink()) {
+          throw new Error('Akses ditolak: symlink tidak dapat dihapus');
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        break;
+      }
+    }
   }
 
   // Resolve existing symlinks, including the nearest existing parent for new files.
@@ -97,7 +113,7 @@ let handler = async (m, { args, command, sock }) => {
     if (!inputPath) return m.reply(`Usage: *!removefile <path>*\nContoh: !removefile logs/old.log`);
 
     let fp;
-    try { fp = safePath(inputPath); } catch (e) { return m.reply(`🚫 ${e.message}`); }
+    try { fp = safePath(inputPath, { rejectSymlinks: true }); } catch (e) { return m.reply(`🚫 ${e.message}`); }
 
     if (!fs.existsSync(fp)) return m.reply(`❌ File tidak ditemukan: \`${inputPath}\``);
 

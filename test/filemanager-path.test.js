@@ -26,6 +26,15 @@ async function listFilesReply(inputPath) {
   return reply;
 }
 
+async function removeFileReply(inputPath) {
+  let reply;
+  await handler(
+    { reply: message => { reply = message; return message; } },
+    { args: [inputPath], command: 'removefile', sock: {} }
+  );
+  return reply;
+}
+
 test('rejects parent-directory traversal', async () => {
   assert.match(await getFileReply('../package.json'), /Akses ditolak/);
 });
@@ -73,5 +82,39 @@ test('does not disclose external target size when listing a symlink', async () =
   } finally {
     fs.rmSync(listingDirectory, { recursive: true, force: true });
     fs.rmSync(outsideDirectory, { recursive: true, force: true });
+  }
+});
+
+test('refuses to remove an internal symlink and preserves its target', async () => {
+  const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-remove-test-'));
+  try {
+    const targetDirectory = path.join(testDirectory, 'target');
+    fs.mkdirSync(targetDirectory);
+    fs.writeFileSync(path.join(targetDirectory, 'keep.txt'), 'still here');
+    fs.symlinkSync(targetDirectory, path.join(testDirectory, 'target-link'), 'dir');
+
+    const reply = await removeFileReply(path.relative(BOT_ROOT, path.join(testDirectory, 'target-link')));
+    assert.match(reply, /symlink tidak dapat dihapus/);
+    assert.equal(fs.readFileSync(path.join(targetDirectory, 'keep.txt'), 'utf8'), 'still here');
+    assert.equal(fs.lstatSync(path.join(testDirectory, 'target-link')).isSymbolicLink(), true);
+
+    const nestedReply = await removeFileReply(path.relative(BOT_ROOT, path.join(testDirectory, 'target-link', 'keep.txt')));
+    assert.match(nestedReply, /symlink tidak dapat dihapus/);
+    assert.equal(fs.readFileSync(path.join(targetDirectory, 'keep.txt'), 'utf8'), 'still here');
+  } finally {
+    fs.rmSync(testDirectory, { recursive: true, force: true });
+  }
+});
+
+test('still removes an ordinary in-root file', async () => {
+  const testDirectory = fs.mkdtempSync(path.join(BOT_ROOT, '.filemanager-remove-file-test-'));
+  const filePath = path.join(testDirectory, 'ordinary.txt');
+  try {
+    fs.writeFileSync(filePath, 'ordinary in-root file');
+    const reply = await removeFileReply(path.relative(BOT_ROOT, filePath));
+    assert.match(reply, /Berhasil dihapus/);
+    assert.equal(fs.existsSync(filePath), false);
+  } finally {
+    fs.rmSync(testDirectory, { recursive: true, force: true });
   }
 });
