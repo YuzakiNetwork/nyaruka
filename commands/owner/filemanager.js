@@ -19,16 +19,64 @@ import { logger } from '../../lib/utils/logger.js';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
 const BOT_ROOT   = path.resolve(__dirname, '../..');
+const BOT_ROOT_REAL = fs.realpathSync(BOT_ROOT);
 
 // Batasi akses hanya dalam direktori bot (keamanan)
 function safePath(inputPath) {
-  // Resolve relatif terhadap root bot
-  const resolved = path.resolve(BOT_ROOT, inputPath.replace(/^\/+/, ''));
-  // Pastikan masih dalam root bot
-  if (!resolved.startsWith(BOT_ROOT)) {
+  let normalizedInput;
+  try {
+    normalizedInput = path.normalize(decodeURIComponent(inputPath));
+  } catch {
+    throw new Error('Akses ditolak: path tidak valid');
+  }
+
+  const resolved = path.resolve(BOT_ROOT_REAL, normalizedInput);
+  const isWithinRoot = candidate => {
+    const relative = path.relative(BOT_ROOT_REAL, candidate);
+    return relative === '' || (
+      relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative)
+    );
+  };
+
+  if (!isWithinRoot(resolved)) {
     throw new Error(`Akses ditolak: path di luar direktori bot`);
   }
-  return resolved;
+
+  // Resolve existing symlinks, including the nearest existing parent for new files.
+  let current = resolved;
+  const missing = [];
+  while (true) {
+    let exists = true;
+    try {
+      fs.lstatSync(current);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      exists = false;
+    }
+
+    if (exists) {
+      let realCurrent;
+      try {
+        realCurrent = fs.realpathSync(current);
+      } catch {
+        throw new Error('Akses ditolak: symlink/path tidak valid');
+      }
+      const canonical = path.resolve(realCurrent, ...missing);
+      if (!isWithinRoot(canonical)) {
+        throw new Error(`Akses ditolak: path di luar direktori bot`);
+      }
+      return canonical;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      throw new Error(`Akses ditolak: path di luar direktori bot`);
+    }
+    missing.unshift(path.basename(current));
+    current = parent;
+  }
 }
 
 function fmtSize(bytes) {
