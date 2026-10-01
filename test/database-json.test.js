@@ -32,6 +32,30 @@ test('backs up the existing JSON file before replacing it', () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(filepath, 'utf-8')), { version: 2 });
 });
 
+test('preserves existing permissions and creates new files as owner-only', () => {
+  const existingCollection = 'atomic-mode-existing';
+  const existingPath = path.join(dbDirectory, `${existingCollection}.json`);
+  const previousUmask = process.umask(0o022);
+  try {
+    fs.writeFileSync(existingPath, JSON.stringify({ version: 1 }), { mode: 0o600 });
+    fs.chmodSync(existingPath, 0o600);
+    jsonDb.writeCollection(existingCollection, { version: 2 });
+    assert.equal(fs.statSync(existingPath).mode & 0o777, 0o600);
+  } finally {
+    process.umask(previousUmask);
+  }
+
+  const newCollection = 'atomic-mode-new';
+  const newPath = path.join(dbDirectory, `${newCollection}.json`);
+  const permissiveUmask = process.umask(0o000);
+  try {
+    jsonDb.writeCollection(newCollection, { version: 1 });
+    assert.equal(fs.statSync(newPath).mode & 0o777, 0o600);
+  } finally {
+    process.umask(permissiveUmask);
+  }
+});
+
 test('propagates replacement failure without clobbering the original or cache', async () => {
   const collection = 'atomic-failure';
   const filepath = path.join(dbDirectory, `${collection}.json`);
