@@ -37,7 +37,7 @@ The owner file manager is intentionally **read-only**: `getfile`, `listfiles`, a
 
 ## Architecture
 
-`index.js` starts the Baileys connection, pairing/reconnect flow, and scheduled economy/world-event jobs. `handler/index.js` discovers command modules recursively, dispatches messages, applies cooldowns and rate limits, and supports command hot reload. Game and economy logic lives in `lib/game/`; `lib/database/db.js` routes persistence to the JSON adapter in `lib/database/json.js`, which uses cached collections, private temporary files, atomic replacement, and backups. Before replacing an existing collection, the adapter creates or replaces one latest backup at `${collection}.json.bak`; this is not an archive, and backups are not restored automatically. The JSON adapter assumes a single writer; it is not a multi-process lock. `webhook/trakteer.js` provides the optional donation integration.
+`index.js` starts the Baileys connection, pairing/reconnect flow, and scheduled economy/world-event jobs. `lib/whatsapp/reliability.js` serializes auth writes, retries recognized transient disconnects with capped exponential backoff and jitter, and prevents overlapping sockets. Auth is preserved for timeouts and ambiguous errors; only a confirmed logout (401/`loggedOut`) quarantines the existing session directory before a new pairing flow. Quarantine backups stay beside the session directory and are ignored by Git. Non-retryable failures stop automatic retries without deleting auth. `handler/index.js` discovers command modules recursively, dispatches messages, applies cooldowns and rate limits, and supports command hot reload. Game and economy logic lives in `lib/game/`; `lib/database/db.js` routes persistence to the JSON adapter in `lib/database/json.js`, which uses cached collections, private temporary files, atomic replacement, and backups. Before replacing an existing collection, the adapter creates or replaces one latest backup at `${collection}.json.bak`; this is not an archive, and backups are not restored automatically. The JSON adapter assumes a single writer; it is not a multi-process lock. `webhook/trakteer.js` provides the optional donation integration.
 
 ## Tests
 
@@ -47,7 +47,7 @@ Run the available test suites with Node's built-in test runner:
 DOTENV_CONFIG_PATH=/dev/null node --test test/*.test.js
 ```
 
-This covers JSON persistence and owner filemanager path/read-only behavior. There is no `npm test` script currently.
+This covers JSON persistence, owner filemanager path/read-only behavior, and WhatsApp session/reconnect reliability using synthetic temporary auth markers. It verifies transient 408 preservation, confirmed-logout quarantine, single-flight backoff, and sanitized awaited credential-save failures. There is no `npm test` script currently.
 
 ## Maintainer guidance
 
