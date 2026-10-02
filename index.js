@@ -24,12 +24,17 @@ import {
   createCredentialPersister,
   createQueuedKeyStore,
   createReconnectController,
+  discardFailedCredentialSaveAfterSessionReset,
+  discardFailedKeyWritesAfterSessionReset,
   quarantineSession,
   retryFailedCredentialSave,
+  retryFailedKeyWrites,
   sanitizeDiagnostic,
 } from './lib/whatsapp/reliability.js';
 import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
+import { closeWhatsAppSocket, trackWhatsAppSocket } from './lib/whatsapp/socket-close.js';
+import { installFatalProcessHandlers } from './lib/whatsapp/process-guards.js';
 import { loadCommands, watchCommands, routeMessage, normalizeMessage, setContactStore, getCommandStats } from './handler/index.js';
 import { loadEconomy, economyTick, checkAndRotateWorldEvent } from './lib/game/economy.js';
 import { startPolling, stopPolling, setWASock as setDonateWASock } from './webhook/trakteer.js';
@@ -60,30 +65,6 @@ function clearPairingTimer() {
   }
 }
 
-async function closeWhatsAppSocket(sock) {
-  if (!sock) return;
-  const ws = sock.ws;
-  if (!ws || ws.readyState === 3 || typeof ws.once !== 'function') {
-    try { sock.end(); } catch {}
-    return;
-  }
-
-  await new Promise((resolve) => {
-    let timer;
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      ws.off?.('close', finish);
-      resolve();
-    };
-    ws.once('close', finish);
-    timer = setTimeout(finish, 2_000);
-    try { sock.end(); } catch { finish(); }
-  });
-}
-
 const reconnect = createReconnectController({
   connect: connectWhatsApp,
   closeSocket: closeWhatsAppSocket,
@@ -91,7 +72,12 @@ const reconnect = createReconnectController({
     // Baileys writes creds and Signal keys to the configured path; drain both
     // queues before moving that path so no old write can repopulate a new session.
     await Promise.all([credentialWriteQueue.current, keyWriteQueue.current]);
-    return quarantineSession(SESSION_DIR);
+    const quarantinePath = quarantineSession(SESSION_DIR);
+    if (quarantinePath) {
+      discardFailedCredentialSaveAfterSessionReset(credentialWriteQueue);
+      discardFailedKeyWritesAfterSessionReset(keyWriteQueue);
+    }
+    return quarantinePath;
   },
   onPairingRequired: () => {
     clearPairingTimer();
@@ -178,6 +164,9 @@ async function connectWhatsApp(registerSocket) {
   if (!(await retryFailedCredentialSave(credentialWriteQueue))) {
     throw Object.assign(new Error('Credential save remains pending'), { code: 'EAGAIN' });
   }
+  if (!(await retryFailedKeyWrites(keyWriteQueue))) {
+    throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
@@ -193,7 +182,7 @@ async function connectWhatsApp(registerSocket) {
     isActive: () => !socketRegistered || reconnect.getSocket() === sock,
     report: (details) => logger.error(
       { event: 'signal-key.update', ...details },
-      'WhatsApp Signal-key persistence failed; auth state preserved',
+      'WhatsApp Signal-key persistence failed; auth state marked dirty and reconnect blocked until repair',
     ),
   });
   sock = makeWASocket({
@@ -212,6 +201,7 @@ async function connectWhatsApp(registerSocket) {
     retryRequestDelayMs:            2_000,
     mobile:                         false,
   });
+  trackWhatsAppSocket(sock);
 
   if (!registerSocket(sock)) throw new Error('WhatsApp socket registration rejected');
   socketRegistered = true;
@@ -357,12 +347,10 @@ function startCronJobs(sock) {
 
 // ── Guards ────────────────────────────────────────────────────────────────────
 
-process.on('unhandledRejection', (reason) => {
-  logger.error(sanitizeDiagnostic(reason), 'Unhandled promise rejection; WhatsApp auth state preserved');
-});
-
-process.on('uncaughtException', (err) => {
-  logger.error(sanitizeDiagnostic(err), 'Uncaught exception; WhatsApp auth state preserved');
+installFatalProcessHandlers({
+  processObject: process,
+  logger,
+  cleanup: () => reconnect.close(),
 });
 
 start().catch(err => {

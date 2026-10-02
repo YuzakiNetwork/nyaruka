@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,14 +9,19 @@ import { after, test } from 'node:test';
 import { createLogger } from '../lib/utils/logger.js';
 import { writePairingCodeToTerminal } from '../lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from '../lib/whatsapp/reconnect-logging.js';
+import { installFatalProcessHandlers } from '../lib/whatsapp/process-guards.js';
+import { closeWhatsAppSocket, trackWhatsAppSocket } from '../lib/whatsapp/socket-close.js';
 import {
   calculateRetryDelay,
   classifyDisconnect,
   createCredentialPersister,
   createQueuedKeyStore,
   createReconnectController,
+  discardFailedCredentialSaveAfterSessionReset,
+  discardFailedKeyWritesAfterSessionReset,
   quarantineSession,
   retryFailedCredentialSave,
+  retryFailedKeyWrites,
 } from '../lib/whatsapp/reliability.js';
 
 const tempRoots = new Set();
@@ -37,6 +43,13 @@ function loggedOutError() {
   return Object.assign(new Error('Stream Errored'), {
     reason: 'loggedOut',
     output: { statusCode: 401 },
+  });
+}
+
+function baileysFailure401() {
+  return Object.assign(new Error('Connection Failure'), {
+    output: { statusCode: 401 },
+    data: { reason: '401' },
   });
 }
 
@@ -137,7 +150,9 @@ test('only explicit loggedOut quarantines auth; bare 401 and ambiguous errors do
   await controller.connect();
   assert.equal(classifyDisconnect({ output: { statusCode: 401 } }), 'stop');
   assert.equal(classifyDisconnect(loggedOutError()), 'logout');
-  await controller.handleDisconnect(socket, loggedOutError());
+  assert.equal(classifyDisconnect(baileysFailure401()), 'logout');
+  assert.equal(classifyDisconnect({ message: 'Connection Failure', output: { statusCode: 401 }, data: { reason: '500' } }), 'stop');
+  await controller.handleDisconnect(socket, baileysFailure401());
 
   assert.ok(quarantinePath);
   assert.equal(fs.readFileSync(path.join(quarantinePath, 'creds.json'), 'utf8'), originalContents);
@@ -433,6 +448,89 @@ test('quarantine restores the original directory if replacement creation fails a
   assert.equal(fs.readdirSync(path.dirname(sessionDirectory)).some((name) => name.includes('.quarantine-')), false);
 });
 
+test('successful session reset discards failed writes bound to the old auth directory', async () => {
+  const { sessionDirectory } = makeSessionDirectory();
+  let staleCredentialRetries = 0;
+  let staleKeyRetries = 0;
+  const credentialQueue = {
+    current: Promise.resolve(),
+    pendingSave: async () => { staleCredentialRetries += 1; },
+  };
+  const keyQueue = {
+    current: Promise.resolve(),
+    pendingWrites: [{ retry: async () => { staleKeyRetries += 1; }, report: () => {} }],
+    dirty: true,
+  };
+
+  const quarantinedPath = quarantineSession(sessionDirectory, { now: () => 112233 });
+  assert.ok(quarantinedPath);
+  discardFailedCredentialSaveAfterSessionReset(credentialQueue);
+  discardFailedKeyWritesAfterSessionReset(keyQueue);
+  assert.equal(await retryFailedCredentialSave(credentialQueue), true);
+  assert.equal(await retryFailedKeyWrites(keyQueue), true);
+  assert.equal(staleCredentialRetries, 0);
+  assert.equal(staleKeyRetries, 0);
+  assert.equal(keyQueue.dirty, false);
+});
+
+test('failed Signal-key writes stay dirty and block auth reload until repaired on restart', async () => {
+  const queue = { current: Promise.resolve() };
+  const timers = makeFakeTimers();
+  const firstSocket = { id: 'socket-before-key-repair' };
+  const nextSocket = { id: 'socket-after-key-repair' };
+  let controller;
+  let keySaveCalls = 0;
+  let connectCalls = 0;
+  let authReloads = 0;
+  const keys = createQueuedKeyStore({
+    get: async () => ({}),
+    set: async () => {
+      keySaveCalls += 1;
+      if (keySaveCalls <= 2) throw Object.assign(new Error('synthetic Signal-key disk failure'), { code: 'EIO' });
+    },
+  }, { queue, isActive: () => true });
+
+  controller = createReconnectController({
+    connect: async () => {
+      connectCalls += 1;
+      if (connectCalls === 1) {
+        authReloads += 1;
+        return firstSocket;
+      }
+      if (!(await retryFailedKeyWrites(queue))) {
+        throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
+      }
+      authReloads += 1;
+      return nextSocket;
+    },
+    closeSocket: async () => {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  await assert.rejects(keys.set({ session: { synthetic: 'opaque test key marker' } }), /synthetic Signal-key disk failure/);
+  assert.equal(queue.dirty, true);
+  await assert.rejects(keys.set({ session: { later: 'queued behind failed key write' } }), /pending repair/);
+  assert.equal(queue.pendingWrites.length, 2);
+  assert.equal(keySaveCalls, 1);
+
+  await controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await timers.fireNext();
+  assert.equal(authReloads, 1);
+  assert.equal(queue.dirty, true);
+  assert.equal(queue.pendingWrites.length, 2);
+  assert.equal(controller.getSocket(), null);
+
+  await timers.fireNext();
+  assert.equal(keySaveCalls, 4);
+  assert.equal(authReloads, 2);
+  assert.equal(queue.dirty, false);
+  assert.deepEqual(queue.pendingWrites, []);
+  assert.equal(controller.getSocket(), nextSocket);
+});
+
 test('logout drains in-flight Signal-key writes and skips queued writes from the stale socket', async () => {
   const { sessionDirectory } = makeSessionDirectory();
   const keyPath = path.join(sessionDirectory, 'session-test-key.json');
@@ -552,6 +650,44 @@ test('clean WebSocket close without a disconnect error schedules a reconnect', a
   assert.equal(quarantineCalls, 0);
 });
 
+test('terminal logout queued during an in-flight close wins over a transient retry', async () => {
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  const firstSocket = { id: 'socket-close-then-logout' };
+  let releaseClose;
+  let connectCalls = 0;
+  let quarantineCalls = 0;
+  const controller = createReconnectController({
+    connect: async () => (++connectCalls === 1 ? firstSocket : { id: 'socket-after-logout' }),
+    closeSocket: () => new Promise((resolve) => {
+      releaseClose = () => resolve(true);
+    }),
+    quarantine: async () => {
+      quarantineCalls += 1;
+      return '/synthetic/quarantined-session';
+    },
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  const transientTransition = controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 0);
+
+  const logoutTransition = controller.handleDisconnect(firstSocket, baileysFailure401());
+  releaseClose();
+  await Promise.all([transientTransition, logoutTransition]);
+
+  assert.equal(quarantineCalls, 1);
+  assert.equal(connectCalls, 1);
+  assert.deepEqual(diagnostics.filter(({ event }) => event === 'retry_scheduled').map(({ details }) => details.reason), ['pairing']);
+  assert.equal(diagnostics.filter(({ event }) => event === 'logout_confirmed').length, 1);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 1);
+});
+
 test('unknown WebSocket errors close the stale socket and recover with auth preserved', async () => {
   const timers = makeFakeTimers();
   const firstSocket = { id: 'socket-unknown-error' };
@@ -578,6 +714,143 @@ test('unknown WebSocket errors close the stale socket and recover with auth pres
   assert.equal(controller.getSocket(), nextSocket);
   assert.equal(connectCalls, 2);
   assert.equal(quarantineCalls, 0);
+});
+
+test('retry waits for the raw Baileys WebSocket close after sock.end removes wrapper listeners', async () => {
+  const timers = makeFakeTimers();
+  const wrapper = new EventEmitter();
+  const rawSocket = new EventEmitter();
+  rawSocket.readyState = 1;
+  wrapper.socket = rawSocket;
+  Object.defineProperties(wrapper, {
+    isClosed: { get: () => !wrapper.socket || wrapper.socket.readyState === 3 },
+    isClosing: { get: () => !wrapper.socket || wrapper.socket.readyState === 2 },
+  });
+  let wrapperCloseEvents = 0;
+  wrapper.on('close', () => { wrapperCloseEvents += 1; });
+  let closeStarted = false;
+  const firstSocket = {
+    ws: wrapper,
+    end() {
+      wrapper.removeAllListeners('close');
+      if (!closeStarted) {
+        closeStarted = true;
+        rawSocket.readyState = 2;
+        wrapper.socket = null;
+        setTimeout(() => {
+          rawSocket.readyState = 3;
+          rawSocket.emit('close');
+        }, 15);
+      }
+    },
+  };
+  assert.equal(trackWhatsAppSocket(firstSocket), true);
+  const nextSocket = { id: 'socket-after-raw-close' };
+  let connectCalls = 0;
+  const controller = createReconnectController({
+    connect: async () => {
+      connectCalls += 1;
+      if (connectCalls === 1) return firstSocket;
+      assert.equal(rawSocket.readyState, 3);
+      return nextSocket;
+    },
+    closeSocket: (socket) => closeWhatsAppSocket(socket, { timeoutMs: 100 }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  firstSocket.end(); // Baileys end() has already nulled the wrapper socket and removed its close listener.
+  const transition = controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rawSocket.readyState, 2);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 0);
+  assert.equal(await transition, true);
+  assert.equal(rawSocket.readyState, 3);
+  assert.equal(wrapperCloseEvents, 0);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 1);
+
+  await timers.fireNext();
+  assert.equal(controller.getSocket(), nextSocket);
+  assert.equal(connectCalls, 2);
+});
+
+test('unconfirmed socket close blocks retry and resume from opening a concurrent socket', async () => {
+  const timers = makeFakeTimers();
+  const wrapper = new EventEmitter();
+  const rawSocket = new EventEmitter();
+  rawSocket.readyState = 1;
+  wrapper.socket = rawSocket;
+  Object.defineProperties(wrapper, {
+    isClosed: { get: () => !wrapper.socket || wrapper.socket.readyState === 3 },
+    isClosing: { get: () => !wrapper.socket || wrapper.socket.readyState === 2 },
+  });
+  const firstSocket = {
+    ws: wrapper,
+    end() {
+      wrapper.removeAllListeners('close');
+      rawSocket.readyState = 2;
+      wrapper.socket = null;
+    },
+  };
+  let connectCalls = 0;
+  const controller = createReconnectController({
+    connect: async () => {
+      connectCalls += 1;
+      return firstSocket;
+    },
+    closeSocket: (socket) => closeWhatsAppSocket(socket, { timeoutMs: 5 }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  assert.equal(await controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } }), false);
+  assert.equal(rawSocket.readyState, 2);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 0);
+  assert.equal(await controller.connect(), null);
+  assert.equal(await controller.resume(), null);
+  assert.equal(connectCalls, 1);
+});
+
+test('fatal process handlers await cleanup and exit nonzero for both fatal event types', async () => {
+  for (const eventName of ['uncaughtException', 'unhandledRejection']) {
+    const processObject = new EventEmitter();
+    const order = [];
+    let releaseCleanup;
+    const cleanupGate = new Promise((resolve) => { releaseCleanup = resolve; });
+    processObject.exit = (code) => order.push(`exit:${code}`);
+    const logger = {
+      fatal: (_details, message) => order.push(`fatal:${message}`),
+      error: (_details, message) => order.push(`error:${message}`),
+    };
+    const handlers = installFatalProcessHandlers({
+      processObject,
+      logger,
+      cleanup: async () => {
+        order.push('cleanup-start');
+        await cleanupGate;
+        order.push('cleanup-finished');
+      },
+    });
+    const failure = new Error('synthetic fatal process error');
+
+    assert.equal(processObject.listenerCount(eventName), 1);
+    processObject.emit(eventName, failure);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(order.includes('cleanup-finished'), false);
+    assert.equal(order.some((entry) => entry.startsWith('exit:')), false);
+
+    releaseCleanup();
+    await handlers.handleFatalError(failure, eventName);
+    assert.deepEqual(order.slice(-2), ['cleanup-finished', 'exit:1']);
+    assert.equal(order.filter((entry) => entry === 'exit:1').length, 1);
+    handlers.dispose();
+    assert.equal(processObject.listenerCount('uncaughtException'), 0);
+    assert.equal(processObject.listenerCount('unhandledRejection'), 0);
+  }
 });
 
 test('pairing codes stay on an interactive TTY and legacy Pino fields are redacted', async () => {
