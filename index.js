@@ -26,6 +26,7 @@ import {
   createReconnectController,
   discardFailedCredentialSaveAfterSessionReset,
   discardFailedKeyWritesAfterSessionReset,
+  hasInFlightKeyWriteRecovery,
   quarantineSession,
   retryFailedCredentialSave,
   retryFailedKeyWrites,
@@ -72,6 +73,9 @@ const reconnect = createReconnectController({
     // Baileys writes creds and Signal keys to the configured path; drain both
     // queues before moving that path so no old write can repopulate a new session.
     await Promise.all([credentialWriteQueue.current, keyWriteQueue.current]);
+    if (hasInFlightKeyWriteRecovery(keyWriteQueue)) {
+      throw new Error('Signal-key recovery is still in flight; refusing to reset auth state');
+    }
     const quarantinePath = quarantineSession(SESSION_DIR);
     if (quarantinePath) {
       discardFailedCredentialSaveAfterSessionReset(credentialWriteQueue);

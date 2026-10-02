@@ -531,6 +531,87 @@ test('failed Signal-key writes stay dirty and block auth reload until repaired o
   assert.equal(controller.getSocket(), nextSocket);
 });
 
+test('reconnect waits for an active Signal-key write and repairs its failure before auth reload', async () => {
+  const queue = { current: Promise.resolve() };
+  const timers = makeFakeTimers();
+  const firstSocket = { id: 'socket-before-inflight-key-write' };
+  const nextSocket = { id: 'socket-after-inflight-key-repair' };
+  let rejectInitialWrite;
+  let resolveRepair;
+  let initialWriteStarted;
+  let repairStarted;
+  const initialStarted = new Promise((resolve) => { initialWriteStarted = resolve; });
+  const repairHasStarted = new Promise((resolve) => { repairStarted = resolve; });
+  let keySaveCalls = 0;
+  let connectCalls = 0;
+  let authReloads = 0;
+  const keys = createQueuedKeyStore({
+    get: async () => ({}),
+    set: async () => {
+      keySaveCalls += 1;
+      if (keySaveCalls === 1) {
+        initialWriteStarted();
+        return new Promise((_resolve, reject) => { rejectInitialWrite = reject; });
+      }
+      if (keySaveCalls === 2) {
+        repairStarted();
+        return new Promise((resolve) => { resolveRepair = resolve; });
+      }
+    },
+  }, { queue, isActive: () => true });
+  const controller = createReconnectController({
+    connect: async () => {
+      connectCalls += 1;
+      if (connectCalls === 1) return firstSocket;
+      if (!(await retryFailedKeyWrites(queue, { timeoutMs: 1_000 }))) {
+        throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
+      }
+      authReloads += 1;
+      return nextSocket;
+    },
+    closeSocket: async () => {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  const activeWrite = keys.set({ session: { synthetic: 'pending test key marker' } });
+  await initialStarted;
+  await controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await timers.fireNext();
+  const reconnectPromise = controller.connect();
+  assert.equal(authReloads, 0);
+  assert.equal(queue.recoveryBlocked, true);
+
+  rejectInitialWrite(new Error('synthetic in-flight Signal-key write failure'));
+  await assert.rejects(activeWrite, /synthetic in-flight Signal-key write failure/);
+  await repairHasStarted;
+  assert.equal(keySaveCalls, 2);
+  assert.equal(authReloads, 0);
+  assert.equal(queue.dirty, true);
+  assert.equal(queue.pendingWrites.length, 1);
+  assert.equal(controller.getSocket(), null);
+
+  resolveRepair();
+  assert.equal(await reconnectPromise, nextSocket);
+  assert.equal(authReloads, 1);
+  assert.equal(queue.dirty, false);
+  assert.equal(queue.recoveryBlocked, false);
+  assert.deepEqual(queue.pendingWrites, []);
+  assert.equal(controller.getSocket(), nextSocket);
+});
+
+test('Signal-key queue recovery times out as unhealthy instead of hanging or allowing auth reload', async () => {
+  const queue = { current: new Promise(() => {}) };
+  const startedAt = Date.now();
+
+  assert.equal(await retryFailedKeyWrites(queue, { timeoutMs: 5 }), false);
+  assert.ok(Date.now() - startedAt < 500);
+  assert.equal(queue.dirty, true);
+  assert.equal(queue.recoveryBlocked, true);
+});
+
 test('logout drains in-flight Signal-key writes and skips queued writes from the stale socket', async () => {
   const { sessionDirectory } = makeSessionDirectory();
   const keyPath = path.join(sessionDirectory, 'session-test-key.json');
