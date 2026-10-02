@@ -24,6 +24,7 @@ import {
   retryFailedKeyWrites,
   runConnectStage,
   waitForKeyWriteQueueDrain,
+  waitForPromiseQueueDrain,
 } from '../lib/whatsapp/reliability.js';
 
 const tempRoots = new Set();
@@ -614,6 +615,22 @@ test('Signal-key queue recovery times out as unhealthy instead of hanging or all
   assert.equal(queue.recoveryBlocked, true);
 });
 
+test('connect-stage timeout aborts its local operation signal and settles promptly', async () => {
+  let stageSignal;
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    runConnectStage(undefined, (signal) => {
+      stageSignal = signal;
+      return new Promise(() => {});
+    }, { timeoutMs: 5 }),
+    (error) => error.name === 'TimeoutError' && error.code === 'ETIMEDOUT',
+  );
+
+  assert.equal(stageSignal.aborted, true);
+  assert.ok(Date.now() - startedAt < 500);
+});
+
 test('terminal logout preempts a connect waiting on key recovery, quarantines once, then continues pairing once', async () => {
   const { sessionDirectory, credsPath } = makeSessionDirectory();
   const originalContents = fs.readFileSync(credsPath, 'utf8');
@@ -719,7 +736,9 @@ test('terminal logout preempts a connect waiting on key recovery, quarantines on
   await repairStarted;
   assert.equal(authLoads, 1);
   assert.equal(socketStarts, 1);
-  assert.equal(quarantineCalls, 0);
+  assert.equal(quarantineCalls, 1);
+  assert.equal(quarantinePath, undefined);
+  assert.equal(fs.existsSync(sessionDirectory), true);
   assert.equal(queue.pendingWrites.length, 1);
   assert.equal(controller.getSocket(), null);
 
@@ -845,6 +864,191 @@ test('terminal logout timeout preserves auth and reports quarantine failure with
   assert.equal(queue.dirty, true);
   assert.equal(queue.recoveryBlocked, true);
   assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+});
+
+test('terminal logout cancels a stuck version lookup, drains writes, and ignores its late result', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const credentialQueue = { current: Promise.resolve() };
+  let releaseCredentialWrite;
+  let signalCredentialWriteStarted;
+  const credentialWriteStarted = new Promise((resolve) => { signalCredentialWriteStarted = resolve; });
+  const persistCredentials = createCredentialPersister(() => {
+    signalCredentialWriteStarted();
+    return new Promise((resolve) => { releaseCredentialWrite = resolve; });
+  }, () => {}, credentialQueue);
+  const credentialWrite = persistCredentials();
+  await credentialWriteStarted;
+
+  const keyQueue = { current: Promise.resolve() };
+  let releaseKeyWrite;
+  let signalKeyWriteStarted;
+  const keyWriteStarted = new Promise((resolve) => { signalKeyWriteStarted = resolve; });
+  const keys = createQueuedKeyStore({
+    get: async () => ({}),
+    set: async () => {
+      signalKeyWriteStarted();
+      return new Promise((resolve) => { releaseKeyWrite = resolve; });
+    },
+  }, { queue: keyQueue, isActive: () => true });
+  const keyWrite = keys.set({ session: { synthetic: 'version-lookup logout marker' } });
+  await keyWriteStarted;
+
+  let resolveVersionLookup;
+  let signalVersionLookupStarted;
+  let signalQuarantineStarted;
+  const versionLookup = new Promise((resolve) => { resolveVersionLookup = resolve; });
+  const versionLookupStarted = new Promise((resolve) => { signalVersionLookupStarted = resolve; });
+  const quarantineStarted = new Promise((resolve) => { signalQuarantineStarted = resolve; });
+  const timers = makeFakeTimers();
+  const firstSocket = { id: 'socket-before-stuck-version-lookup' };
+  const unsafeSocket = { id: 'must-not-start-after-cancelled-version-lookup' };
+  const pairingSocket = { id: 'pairing-socket-after-version-lookup-logout' };
+  let versionLookupSignal;
+  let connectCalls = 0;
+  let authLoads = 0;
+  let socketStarts = 0;
+  let quarantineCalls = 0;
+  let pairingRequired = 0;
+  let quarantinePath;
+
+  const controller = createReconnectController({
+    connect: async (_registerSocket, { signal }) => {
+      connectCalls += 1;
+      if (connectCalls === 1) {
+        authLoads += 1;
+        socketStarts += 1;
+        return firstSocket;
+      }
+      if (connectCalls === 2) {
+        await runConnectStage(signal, (stageSignal) => {
+          versionLookupSignal = stageSignal;
+          signalVersionLookupStarted();
+          return versionLookup;
+        }, { timeoutMs: 5_000 });
+        // These counters model the later auth read and socket creation stages.
+        authLoads += 1;
+        socketStarts += 1;
+        return unsafeSocket;
+      }
+      if (connectCalls === 3) {
+        authLoads += 1;
+        socketStarts += 1;
+        return pairingSocket;
+      }
+      throw new Error('unexpected extra connect attempt');
+    },
+    closeSocket: async () => true,
+    quarantine: async () => {
+      quarantineCalls += 1;
+      signalQuarantineStarted();
+      const [credentialsDrained, keysDrained] = await Promise.all([
+        waitForPromiseQueueDrain(credentialQueue, { timeoutMs: 1_000 }),
+        waitForKeyWriteQueueDrain(keyQueue, { timeoutMs: 1_000 }),
+      ]);
+      if (!credentialsDrained || !keysDrained) {
+        throw new Error('Old credential and Signal-key writes did not drain');
+      }
+      quarantinePath = quarantineSession(sessionDirectory, { now: () => 445566 });
+      if (quarantinePath) {
+        discardFailedCredentialSaveAfterSessionReset(credentialQueue);
+        discardFailedKeyWritesAfterSessionReset(keyQueue);
+      }
+      return quarantinePath;
+    },
+    onPairingRequired: () => { pairingRequired += 1; },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  await controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await timers.fireNext();
+  const stuckReconnect = controller.connect();
+  await versionLookupStarted;
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+
+  const logout = controller.handleDisconnect(firstSocket, baileysFailure401());
+  assert.equal(await stuckReconnect, null);
+  await quarantineStarted;
+  assert.equal(versionLookupSignal.aborted, true);
+  assert.equal(quarantineCalls, 1);
+  assert.equal(quarantinePath, undefined);
+  assert.equal(pairingRequired, 0);
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+
+  releaseCredentialWrite();
+  assert.equal(await credentialWrite, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(quarantinePath, undefined);
+  releaseKeyWrite();
+  await keyWrite;
+
+  assert.equal(await logout, true);
+  assert.ok(quarantinePath);
+  assert.equal(fs.readFileSync(path.join(quarantinePath, 'creds.json'), 'utf8'), originalContents);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.deepEqual(fs.readdirSync(sessionDirectory), []);
+  assert.equal(pairingRequired, 1);
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+
+  resolveVersionLookup({ version: [2, 3000, 1015901307], isLatest: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(connectCalls, 2);
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+  assert.equal(controller.getSocket(), null);
+
+  await timers.fireNext();
+  assert.equal(await controller.connect(), pairingSocket);
+  assert.equal(connectCalls, 3);
+  assert.equal(authLoads, 2);
+  assert.equal(socketStarts, 2);
+  assert.equal(controller.getSocket(), pairingSocket);
+  assert.equal(await controller.close(), true);
+});
+
+test('terminal logout preserves auth when credential writes miss the safe-drain deadline', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const credentialQueue = { current: new Promise(() => {}) };
+  const socket = { id: 'socket-before-credential-drain-timeout' };
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  let quarantinePath;
+  let pairingRequired = 0;
+  const controller = createReconnectController({
+    connect: async () => socket,
+    closeSocket: async () => true,
+    quarantine: async () => {
+      if (!(await waitForPromiseQueueDrain(credentialQueue, { timeoutMs: 10 }))) {
+        throw new Error('Credential writes did not reach a safe quarantine boundary; preserving auth state');
+      }
+      quarantinePath = quarantineSession(sessionDirectory, { now: () => 556677 });
+      return quarantinePath;
+    },
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    onPairingRequired: () => { pairingRequired += 1; },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  await controller.connect();
+  assert.equal(await controller.handleDisconnect(socket, loggedOutError()), false);
+  assert.equal(quarantinePath, undefined);
+  assert.equal(pairingRequired, 0);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+  assert.equal(fs.readdirSync(path.dirname(sessionDirectory)).some((name) => name.includes('.quarantine-')), false);
+  assert.equal(diagnostics.filter(({ event }) => event === 'session_quarantine_failed').length, 1);
+  assert.equal(diagnostics.some(({ event }) => event === 'session_quarantined'), false);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared && !timer.fired).length, 0);
 });
 
 test('logout drains in-flight Signal-key writes and skips queued writes from the stale socket', async () => {

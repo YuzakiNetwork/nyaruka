@@ -33,6 +33,7 @@ import {
   runConnectStage,
   sanitizeDiagnostic,
   waitForKeyWriteQueueDrain,
+  waitForPromiseQueueDrain,
 } from './lib/whatsapp/reliability.js';
 import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
@@ -46,6 +47,9 @@ const SESSION_DIR = path.resolve(`./${config.bot.sessionName}`);
 const LOGS_DIR    = path.resolve('./logs');
 const credentialWriteQueue = { current: Promise.resolve() };
 const keyWriteQueue = { current: Promise.resolve() };
+const authReadQueue = { current: Promise.resolve() };
+const VERSION_LOOKUP_TIMEOUT_MS = 15_000;
+const SESSION_DRAIN_TIMEOUT_MS = 10_000;
 
 let _cronsStarted = false;
 let _pairingDone  = false;
@@ -61,6 +65,13 @@ function hasSession() {
   return fs.existsSync(path.join(SESSION_DIR, 'creds.json'));
 }
 
+function beginAuthStateRead() {
+  const pendingRead = useMultiFileAuthState(SESSION_DIR);
+  const settledRead = Promise.resolve(pendingRead).then(() => undefined, () => undefined);
+  authReadQueue.current = Promise.all([authReadQueue.current, settledRead]).then(() => undefined);
+  return pendingRead;
+}
+
 function clearPairingTimer() {
   if (_pairingTimer) {
     clearTimeout(_pairingTimer);
@@ -72,10 +83,20 @@ const reconnect = createReconnectController({
   connect: connectWhatsApp,
   closeSocket: closeWhatsAppSocket,
   quarantine: async () => {
-    // Baileys writes creds and Signal keys to the configured path; drain both
-    // queues before moving that path so no old write can repopulate a new session.
-    await credentialWriteQueue.current;
-    if (!(await waitForKeyWriteQueueDrain(keyWriteQueue))) {
+    // Drain writes and in-progress auth reads before moving the configured path.
+    // A timeout preserves the existing directory rather than resetting under I/O.
+    const [credentialsDrained, authReadsDrained, keysDrained] = await Promise.all([
+      waitForPromiseQueueDrain(credentialWriteQueue, { timeoutMs: SESSION_DRAIN_TIMEOUT_MS }),
+      waitForPromiseQueueDrain(authReadQueue, { timeoutMs: SESSION_DRAIN_TIMEOUT_MS }),
+      waitForKeyWriteQueueDrain(keyWriteQueue, { timeoutMs: SESSION_DRAIN_TIMEOUT_MS }),
+    ]);
+    if (!credentialsDrained) {
+      throw new Error('Credential writes did not reach a safe quarantine boundary; preserving auth state');
+    }
+    if (!authReadsDrained) {
+      throw new Error('Auth-state reads did not reach a safe quarantine boundary; preserving auth state');
+    }
+    if (!keysDrained) {
       throw new Error('Signal-key recovery did not reach a safe boundary; preserving auth state');
     }
     const quarantinePath = quarantineSession(SESSION_DIR);
@@ -175,11 +196,16 @@ async function connectWhatsApp(registerSocket, { signal, closeCandidate } = {}) 
     throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
   }
 
-  const { state, saveCreds } = await runConnectStage(signal, () => useMultiFileAuthState(SESSION_DIR));
-
-  const { version, isLatest } = await runConnectStage(signal, () => fetchLatestBaileysVersion());
+  const { version, isLatest } = await runConnectStage(
+    signal,
+    (stageSignal) => fetchLatestBaileysVersion({ timeout: VERSION_LOOKUP_TIMEOUT_MS, signal: stageSignal }),
+    { timeoutMs: VERSION_LOOKUP_TIMEOUT_MS },
+  );
   assertConnectAttemptActive(signal);
   logger.info({ version: version.join('.'), isLatest }, '📡 WA version');
+
+  const { state, saveCreds } = await runConnectStage(signal, () => beginAuthStateRead());
+  assertConnectAttemptActive(signal);
 
   const baileyLogger = pino({ level: 'silent' });
 
