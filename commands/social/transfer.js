@@ -29,7 +29,10 @@ let handler = async (m, { args }) => {
   if (targetJid === m.sender) return m.reply(`❌ Tidak bisa transfer ke diri sendiri.`);
 
   const target = getPlayer(targetJid);
-  if (!target) return m.reply(`❌ Player target belum terdaftar di RPG.`);
+  if (!target) return m.reply(
+    `❌ Pemain tersebut belum bergabung di Nyaruka.\n` +
+    `Minta dia membuat karakter dulu dengan *!register <name> <class>*.`
+  );
 
   const tax   = Math.floor(amount * TAX_RATE);
   const total = amount + tax;

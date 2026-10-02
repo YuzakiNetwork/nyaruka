@@ -49,7 +49,7 @@ export function isOwner(jid) {
 
 export const config = {
   bot: {
-    name:        process.env.BOT_NAME    || 'Haruka Fuyune',
+    name:        process.env.BOT_NAME    || 'Nyaruka',
     prefix:      process.env.BOT_PREFIX  || '!',  // default prefix
     prefixes:    process.env.BOT_PREFIXES?.split(',') || ['!', '.', '/', '#', '>', '+'],  // multi-prefix
     number:      process.env.BOT_NUMBER  || '',

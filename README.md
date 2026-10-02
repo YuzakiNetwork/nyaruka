@@ -1,6 +1,6 @@
 # Nyaruka
 
-Nyaruka is a WhatsApp fantasy RPG bot built with Baileys. It provides RPG progression and battles, player-to-player features, and a game economy backed by local JSON files.
+Bot WhatsApp untuk petualangan interaktif, karakter, duel, dan eksplorasi.
 
 ## Setup and run
 
@@ -14,6 +14,7 @@ Nyaruka is a WhatsApp fantasy RPG bot built with Baileys. It provides RPG progre
 
 The application reads these environment-variable names; this list intentionally contains names only, not values:
 
+- **Runtime:** `NODE_ENV`
 - **Bot and WhatsApp:** `BOT_NUMBER`, `BOT_NAME`, `BOT_OWNER_NUMBER`, `BOT_OWNER_LID`, `BOT_OWNER`, `BOT_PREFIX`, `BOT_PREFIXES`, `SESSION_NAME`
 - **Storage and logging:** `DB_PATH`, `LOG_LEVEL`
 - **Cooldowns:** `BATTLE_COOLDOWN`, `DUNGEON_COOLDOWN`, `SHOP_COOLDOWN`
@@ -22,21 +23,21 @@ The application reads these environment-variable names; this list intentionally 
 
 ## Commands
 
-Send commands in WhatsApp using a configured prefix. For example, `!help` lists commands, `!help rpg` filters by category, and `!help battle` shows command usage; replace `!` if your deployment uses another prefix. Commands and aliases are discovered from the command modules at startup.
+Send commands in WhatsApp using a configured prefix. For example, `!help` lists commands, `!help rpg` filters the Game category, and `!help battle` shows command usage; replace `!` if your deployment uses another prefix. The existing filter remains `rpg`, while the category is displayed to users as **Game**. Commands and aliases are discovered from the command modules at startup.
 
 Current categories include:
 
-- **RPG:** adventure, battle, craft, dungeon, equip, gacha, inventory, quest, and other character/gameplay commands.
+- **Game:** adventure, battle, craft, dungeon, equip, gacha, inventory, quest, and other character/gameplay commands.
 - **Economy:** buy, market, price, sell, and shop.
 - **Social:** inspect and transfer.
 - **Info:** help/menu, ping, and WhatsApp ID utilities.
 - **Owner:** administration, maintenance, reload/system tools, and file inspection.
 
-The owner file manager is intentionally **read-only**: `getfile`, `listfiles`, and `statfile` remain available within the bot directory. File writes, appends, moves, and deletions are refused for safety.
+The owner file manager is intentionally **read-only**: `getfile`, `listfiles`, and `statfile` remain available within the bot directory. File writes, appends, moves, and deletions are refused for safety. **Never use any filemanager command to read, copy, or send `.env`, WhatsApp authentication/session files, tokens, or credentials.**
 
 ## Architecture
 
-`index.js` starts the Baileys connection, pairing/reconnect flow, and scheduled economy/world-event jobs. `handler/index.js` discovers command modules recursively, dispatches messages, applies cooldowns and rate limits, and supports command hot reload. RPG and economy logic lives in `lib/game/`; `lib/database/db.js` routes persistence to the JSON adapter in `lib/database/json.js`, which uses cached collections, private temporary files, atomic replacement, and backups. The JSON adapter assumes a single writer; it is not a multi-process lock. `webhook/trakteer.js` provides the optional donation integration.
+`index.js` starts the Baileys connection, pairing/reconnect flow, and scheduled economy/world-event jobs. `handler/index.js` discovers command modules recursively, dispatches messages, applies cooldowns and rate limits, and supports command hot reload. Game and economy logic lives in `lib/game/`; `lib/database/db.js` routes persistence to the JSON adapter in `lib/database/json.js`, which uses cached collections, private temporary files, atomic replacement, and backups. Before replacing an existing collection, the adapter creates or replaces one latest backup at `${collection}.json.bak`; this is not an archive, and backups are not restored automatically. The JSON adapter assumes a single writer; it is not a multi-process lock. `webhook/trakteer.js` provides the optional donation integration.
 
 ## Tests
 

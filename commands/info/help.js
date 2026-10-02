@@ -19,6 +19,9 @@ const TAG_EMOJI = {
   misc:    '🎲',
 };
 
+const TAG_LABEL = { rpg: 'Game' };
+const displayTag = (tag, uppercase = false) => TAG_LABEL[tag] || (uppercase ? tag.toUpperCase() : tag);
+
 // Urutan tampil tag
 const TAG_ORDER = ['rpg', 'economy', 'social', 'misc', 'info', 'owner'];
 
@@ -40,7 +43,7 @@ let handler = async (m, { args, isOwner }) => {
       const helpLines = (h.help || [arg]).map(u => `  ${p}${u}`).join('\n');
       return m.reply(
         `${TAG_EMOJI[tag] || '🔹'} *Command: ${p}${h.help?.[0]?.split(' ')[0] || arg}*\n` +
-        `Tag:      ${tag}\n` +
+        `Tag:      ${displayTag(tag)}\n` +
         `Cooldown: ${h.cooldown ?? 3}s\n\n` +
         `📖 Usage:\n${helpLines}` +
         (h.ownerOnly ? '\n\n👑 Owner only' : '')
@@ -68,8 +71,8 @@ let handler = async (m, { args, isOwner }) => {
 
   // Header
   let text = filterTag
-    ? `${TAG_EMOJI[filterTag] || '🔹'} *${filterTag.toUpperCase()} Commands*\n\n`
-    : `🏰 *${config.bot.name} — Help Menu*\n` +
+    ? `${TAG_EMOJI[filterTag] || '🔹'} *${displayTag(filterTag, true)} Commands*\n\n`
+    : `✨ *${config.bot.name} • Menu* ✨\n` +
       `Total: *${total} commands*\n\n`;
 
   // Render tiap tag
@@ -80,7 +83,7 @@ let handler = async (m, { args, isOwner }) => {
   for (const tag of orderedTags) {
     if (!grouped[tag]?.length) continue;
     const emoji = TAG_EMOJI[tag] || '🔹';
-    text += `━━━ ${emoji} *${tag.toUpperCase()}* ━━━\n`;
+    text += `━━━ ${emoji} *${displayTag(tag, true)}* ━━━\n`;
 
     for (const h of grouped[tag]) {
       const usages = h.help || [];
@@ -98,7 +101,7 @@ let handler = async (m, { args, isOwner }) => {
   if (!filterTag) {
     text += `💡 *${p}help <tag>* — filter kategori\n`;
     text += `💡 *${p}help <command>* — detail command\n`;
-    text += `\nTag: ${TAG_ORDER.filter(t => grouped[t]).map(t => `*${t}*`).join(' | ')}`;
+    text += `\nTag: ${TAG_ORDER.filter(t => grouped[t]).map(t => `*${displayTag(t)}*`).join(' | ')}`;
   }
 
   return m.reply(text.trim());

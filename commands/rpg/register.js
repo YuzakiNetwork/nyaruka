@@ -28,10 +28,11 @@ let handler = async (m, { args }) => {
     }).join('\n');
 
     return m.reply(
-      `🏰 *Welcome to the RPG World!*\n\n` +
-      `Usage: *!register <name> <class>*\n\n` +
-      `Available classes:\n${classInfo}\n\n` +
-      `Example: *!register Kira Assassin*`
+      `✨ *Selamat datang di Nyaruka!* ✨\n` +
+      `Mulai dengan membuat karaktermu:\n\n` +
+      `*!register <name> <class>*\n\n` +
+      `Pilihan kelas:\n${classInfo}\n\n` +
+      `Contoh: *!register Kira Assassin*`
     );
   }
 
@@ -48,18 +49,18 @@ let handler = async (m, { args }) => {
   const info      = config.rpg.classes[matchedClass];
 
   return m.reply(
-    `✅ *Character Created!*\n\n` +
-    `👤 Name:  *${player.name}*\n` +
-    `⚔️ Class: *${player.class}* ${info.description.split(' ')[0]}\n` +
-    `🎖️ Rank:  *${player.rank}*\n` +
+    `✅ *Karakter berhasil dibuat!*\n\n` +
+    `👤 Nama:  *${player.name}*\n` +
+    `⚔️ Kelas: *${player.class}* ${info.description.split(' ')[0]}\n` +
+    `🎖️ Peringkat:  *${player.rank}*\n` +
     `❤️ HP:    *${player.maxHp}*\n` +
     `💙 Mana:  *${player.maxMana}*\n` +
     `⚔️ ATK:   *${player.attack}*\n` +
     `🛡️ DEF:   *${player.defense}*\n` +
     `💨 SPD:   *${player.speed}*\n\n` +
-    `💰 Starting Gold: *${player.gold}*\n\n` +
-    `Use *!profile* to view your stats\n` +
-    `Use *!battle* to fight your first monster!`
+    `💰 Gold awal: *${player.gold}*\n\n` +
+    `Cek statusmu kapan saja lewat *!profile*.\n` +
+    `Siap untuk tantangan pertama? Coba *!battle*!`
   );
 };
 

@@ -91,7 +91,7 @@ async function start() {
   // Tampilkan banner launching
   await printBanner({
     version:       process.env.npm_package_version || '1.0.0',
-    botName:       config.bot.name    || 'RPGBot',
+    botName:       config.bot.name    || 'Nyaruka',
     prefix:        config.bot.prefix  || '!',
     ownerNumber:   process.env.BOT_OWNER_NUMBER || process.env.BOT_OWNER_LID || 'Belum diset',
     totalCommands: 49,
@@ -101,7 +101,7 @@ async function start() {
     apiKey:        config.donate?.apiKey  || '',
   });
 
-  logger.info('🚀 Starting WhatsApp RPG Bot...');
+  logger.info('🚀 Memulai Nyaruka...');
 
   if (!config.bot.number) {
     console.error('\n\x1b[31m❌ BOT_NUMBER belum diset di .env!\x1b[0m\n');
@@ -245,7 +245,7 @@ async function connectWhatsApp() {
     }
 
     if (connection === 'open') {
-      printConnected(config.bot.name || 'RPG Bot');
+      printConnected(config.bot.name || 'Nyaruka');
       logger.info('✅ Connected!');
 
       // Update WA sock ke donate notifier (setiap reconnect)
