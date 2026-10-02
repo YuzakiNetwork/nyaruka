@@ -1,0 +1,53 @@
+# Nyaruka
+
+Nyaruka is a WhatsApp fantasy RPG bot built with Baileys. It provides RPG progression and battles, player-to-player features, and a game economy backed by local JSON files.
+
+## Setup and run
+
+- Use Node.js 20 or newer.
+- Install dependencies with `npm ci`.
+- Configure the deployment in a local, untracked `.env` file. `BOT_NUMBER` is required to connect; set owner and optional feature settings as needed. Do not commit `.env` or the WhatsApp authentication/session directory.
+- Start with `npm start`. On first connection, follow the pairing-code instructions printed in the terminal and link the device in WhatsApp.
+- For development, use `npm run dev`. If PM2 is installed, `npm run pm2`, `npm run pm2:stop`, `npm run pm2:restart`, and `npm run pm2:logs` manage the configured process. Keep one bot instance writing to the JSON database.
+
+### Configuration names
+
+The application reads these environment-variable names; this list intentionally contains names only, not values:
+
+- **Bot and WhatsApp:** `BOT_NUMBER`, `BOT_NAME`, `BOT_OWNER_NUMBER`, `BOT_OWNER_LID`, `BOT_OWNER`, `BOT_PREFIX`, `BOT_PREFIXES`, `SESSION_NAME`
+- **Storage and logging:** `DB_PATH`, `LOG_LEVEL`
+- **Cooldowns:** `BATTLE_COOLDOWN`, `DUNGEON_COOLDOWN`, `SHOP_COOLDOWN`
+- **Economy:** `ECONOMY_TICK_INTERVAL`, `PRICE_FLOOR`, `PRICE_CAP`, `SHOP_SELL_RATIO`, `DEMAND_DECAY_RATE`, `PRICE_MEAN_REVERSION_RATE`, `PRICE_VOLATILITY_BASE`
+- **Donations:** `DONATE_ENABLED`, `TRAKTEER_API_KEY`, `TRAKTEER_POLL_INTERVAL`, `DONATE_NOTIFY`
+
+## Commands
+
+Send commands in WhatsApp using a configured prefix. For example, `!help` lists commands, `!help rpg` filters by category, and `!help battle` shows command usage; replace `!` if your deployment uses another prefix. Commands and aliases are discovered from the command modules at startup.
+
+Current categories include:
+
+- **RPG:** adventure, battle, craft, dungeon, equip, gacha, inventory, quest, and other character/gameplay commands.
+- **Economy:** buy, market, price, sell, and shop.
+- **Social:** inspect and transfer.
+- **Info:** help/menu, ping, and WhatsApp ID utilities.
+- **Owner:** administration, maintenance, reload/system tools, and file inspection.
+
+The owner file manager is intentionally **read-only**: `getfile`, `listfiles`, and `statfile` remain available within the bot directory. File writes, appends, moves, and deletions are refused for safety.
+
+## Architecture
+
+`index.js` starts the Baileys connection, pairing/reconnect flow, and scheduled economy/world-event jobs. `handler/index.js` discovers command modules recursively, dispatches messages, applies cooldowns and rate limits, and supports command hot reload. RPG and economy logic lives in `lib/game/`; `lib/database/db.js` routes persistence to the JSON adapter in `lib/database/json.js`, which uses cached collections, private temporary files, atomic replacement, and backups. The JSON adapter assumes a single writer; it is not a multi-process lock. `webhook/trakteer.js` provides the optional donation integration.
+
+## Tests
+
+Run the available test suites with Node's built-in test runner:
+
+```sh
+DOTENV_CONFIG_PATH=/dev/null node --test test/*.test.js
+```
+
+This covers JSON persistence and owner filemanager path/read-only behavior. There is no `npm test` script currently.
+
+## Maintainer guidance
+
+For every release or merged update, bump `package.json` using SemVer and keep `package-lock.json` in sync. Update this README whenever setup, configuration names, command categories/behavior, architecture, or test instructions change. Treat re-enabling any filemanager mutation as a security-sensitive change and add appropriate race-resistant path handling and tests first.
