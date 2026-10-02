@@ -123,7 +123,7 @@ async function start() {
 
   // Tampilkan banner launching
   await printBanner({
-    version:       process.env.npm_package_version || '3.0.2',
+    version:       process.env.npm_package_version || '3.1.1',
     botName:       config.bot.name    || 'Nyaruka',
     prefix:        config.bot.prefix  || '!',
     ownerNumber:   process.env.BOT_OWNER_NUMBER || process.env.BOT_OWNER_LID || 'Belum diset',

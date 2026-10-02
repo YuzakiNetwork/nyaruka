@@ -23,15 +23,15 @@ The application reads these environment-variable names; this list intentionally 
 
 ## Commands
 
-Send commands in WhatsApp using a configured prefix. For example, `!help` lists commands, `!help rpg` filters the Game category, and `!help battle` shows command usage; replace `!` if your deployment uses another prefix. The existing filter remains `rpg`, while the category is displayed to users as **Game**. Commands and aliases are discovered from the command modules at startup.
+Send commands in WhatsApp using a configured prefix. `!help` gives a concise onboarding guide instead of printing every command. Use `!help game` (or the existing `!help rpg` alias) for the full Game command list, `!help economy`, `!help social`, or `!help info` for each full category list, and `!help <command>` for command usage; replace `!` if your deployment uses another prefix. Commands and aliases are discovered from the command modules at startup.
 
 Current categories include:
 
-- **Game:** adventure, battle, craft, dungeon, equip, gacha, inventory, quest, and other character/gameplay commands.
-- **Economy:** buy, market, price, sell, and shop.
-- **Social:** inspect and transfer.
-- **Info:** help/menu, ping, and WhatsApp ID utilities.
-- **Owner:** administration, maintenance, reload/system tools, and file inspection.
+- **Game** (`!help game`; `!help rpg` remains supported): adventure, battle, craft, dungeon, equip, gacha, inventory, quest, and other character/gameplay commands.
+- **Ekonomi** (`!help economy`): buy, market, price, sell, and shop.
+- **Sosial** (`!help social`): inspect and transfer.
+- **Info** (`!help info`): help/menu, ping, and WhatsApp ID utilities.
+- **Owner** (`!help owner`, owner only): administration, maintenance, reload/system tools, and file inspection.
 
 The owner file manager is intentionally **read-only**: `getfile`, `listfiles`, and `statfile` remain available within the bot directory. File writes, appends, moves, and deletions are refused for safety. **Never use any filemanager command to read, copy, or send `.env`, WhatsApp authentication/session files, tokens, or credentials.**
 

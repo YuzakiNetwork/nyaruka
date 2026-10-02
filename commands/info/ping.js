@@ -24,6 +24,7 @@ let handler = async (m) => {
     .sort((a, b) => b.level - a.level)[0];
 
   return m.reply(
+    `🏓 *Pong!* Nyaruka aktif dan siap menerima perintah.\n\n` +
     `🤖 *${config.bot.name} Status*\n\n` +
     `⚡ Latency:    *${latency}ms*\n` +
     `📜 Commands:   *${cmds.length}*\n\n` +

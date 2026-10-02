@@ -29,9 +29,9 @@ let handler = async (m, { args }) => {
 
     return m.reply(
       `✨ *Selamat datang di Nyaruka!* ✨\n` +
-      `Mulai dengan membuat karaktermu:\n\n` +
-      `*!register <name> <class>*\n\n` +
-      `Pilihan kelas:\n${classInfo}\n\n` +
+      `Buat karaktermu untuk mulai bermain.\n` +
+      `Cara pakai: *!register <name> <class>*\n` +
+      `Kelas yang tersedia:\n${classInfo}\n` +
       `Contoh: *!register Kira Assassin*`
     );
   }
@@ -49,7 +49,7 @@ let handler = async (m, { args }) => {
   const info      = config.rpg.classes[matchedClass];
 
   return m.reply(
-    `✅ *Karakter berhasil dibuat!*\n\n` +
+    `✅ *Karakter siap!*\n\n` +
     `👤 Nama:  *${player.name}*\n` +
     `⚔️ Kelas: *${player.class}* ${info.description.split(' ')[0]}\n` +
     `🎖️ Peringkat:  *${player.rank}*\n` +
@@ -59,8 +59,8 @@ let handler = async (m, { args }) => {
     `🛡️ DEF:   *${player.defense}*\n` +
     `💨 SPD:   *${player.speed}*\n\n` +
     `💰 Gold awal: *${player.gold}*\n\n` +
-    `Cek statusmu kapan saja lewat *!profile*.\n` +
-    `Siap untuk tantangan pertama? Coba *!battle*!`
+    `Lihat status lengkapmu lewat *!profile*.\n` +
+    `Siap mulai? Coba *!adventure* atau *!battle*.`
   );
 };
 
