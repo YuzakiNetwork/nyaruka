@@ -15,8 +15,8 @@ let handler = async (m, { args }) => {
 
   const target = getPlayer(targetJid);
   if (!target) return m.reply(
-    `❌ Pemain tersebut belum punya karakter di Nyaruka.\n` +
-    `Minta dia membuat karakter dulu dengan *!register <name> <class>*.`
+    `❌ Pemain itu belum punya karakter di Nyaruka.\n` +
+    `Minta dia daftar dulu dengan *!register <name> <class>*.`
   );
 
   const equipped = Object.entries(target.equipment || {})

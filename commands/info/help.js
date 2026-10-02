@@ -3,7 +3,7 @@
  * Auto-detect semua commands dari registry handler.
  * Tidak perlu edit manual saat tambah command baru.
  *
- * Usage: !help | !help <tag> | !help <command>
+ * Usage: !help | !help <category> | !help <command>
  */
 
 import { getCommands } from '../../handler/index.js';
@@ -19,19 +19,41 @@ const TAG_EMOJI = {
   misc:    '🎲',
 };
 
-const TAG_LABEL = { rpg: 'Game' };
-const displayTag = (tag, uppercase = false) => TAG_LABEL[tag] || (uppercase ? tag.toUpperCase() : tag);
+const TAG_LABEL = {
+  rpg: 'Game',
+  economy: 'Ekonomi',
+  social: 'Sosial',
+  info: 'Info',
+};
+const displayTag = tag => TAG_LABEL[tag] || tag.toUpperCase();
 
-// Urutan tampil tag
+// Urutan tampil tag dan alias kategori yang ramah pemain
 const TAG_ORDER = ['rpg', 'economy', 'social', 'misc', 'info', 'owner'];
+const CATEGORY_ALIASES = { game: 'rpg' };
 
 let handler = async (m, { args, isOwner }) => {
-  const p    = config.bot.prefix;
+  const p   = config.bot.prefix;
+  const arg = args[0]?.toLowerCase();
+  const filterTag = CATEGORY_ALIASES[arg] || (TAG_ORDER.includes(arg) ? arg : null);
+
+  // ── !help — panduan singkat ────────────────────────────────────────────────
+  if (!arg) {
+    return m.reply(
+      `✨ *Nyaruka • Mulai dari sini* ✨\n` +
+      `Baru bergabung? Ikuti langkah ini:\n\n` +
+      `1. Buat karakter: *${p}register <name> <class>*\n` +
+      `2. Ambil hadiah harian: *${p}daily*\n` +
+      `3. Mulai menjelajah: *${p}adventure* atau *${p}battle*\n\n` +
+      `Cari perintah lain?\n` +
+      `Game: *${p}help game* • Ekonomi: *${p}help economy* • Sosial: *${p}help social* • Info: *${p}help info*\n` +
+      `Detail command: *${p}help <command>*`
+    );
+  }
+
   const cmds = getCommands();
-  const arg  = args[0]?.toLowerCase();
 
   // ── !help <command> — cari command spesifik ───────────────────────────────
-  if (arg && !TAG_ORDER.includes(arg)) {
+  if (!filterTag) {
     const found = cmds.find(c =>
       c.handler.command.test(arg) ||
       c.handler.help?.some(h => h.toLowerCase().startsWith(arg))
@@ -49,41 +71,26 @@ let handler = async (m, { args, isOwner }) => {
         (h.ownerOnly ? '\n\n👑 Owner only' : '')
       );
     }
-    return m.reply(`❌ Command *${arg}* tidak ditemukan.\nKetik *${p}help* untuk daftar lengkap.`);
+    return m.reply(`❌ Command *${arg}* tidak ditemukan.\nKetik *${p}help* untuk panduan singkat atau pilih kategori perintah.`);
   }
 
-  // ── !help <tag> — filter per kategori ────────────────────────────────────
-  const filterTag = TAG_ORDER.includes(arg) ? arg : null;
-
-  // Kelompokkan commands per tag
+  // ── !help <category> — filter dinamis per kategori ─────────────────────────
   const grouped = {};
   for (const { handler: h } of cmds) {
     // Sembunyikan owner command dari non-owner
     if (h.ownerOnly && !isOwner) continue;
     const tag = h.tags?.[0] || 'misc';
-    if (filterTag && tag !== filterTag) continue;
+    if (tag !== filterTag) continue;
     if (!grouped[tag]) grouped[tag] = [];
     grouped[tag].push(h);
   }
 
-  // Hitung total commands
-  const total = Object.values(grouped).reduce((s, arr) => s + arr.length, 0);
+  let text = `${TAG_EMOJI[filterTag] || '🔹'} *${displayTag(filterTag)} Commands*\n\n`;
 
-  // Header
-  let text = filterTag
-    ? `${TAG_EMOJI[filterTag] || '🔹'} *${displayTag(filterTag, true)} Commands*\n\n`
-    : `✨ *${config.bot.name} • Menu* ✨\n` +
-      `Total: *${total} commands*\n\n`;
-
-  // Render tiap tag
-  const orderedTags = filterTag
-    ? [filterTag]
-    : TAG_ORDER.filter(t => grouped[t]);
-
-  for (const tag of orderedTags) {
+  for (const tag of TAG_ORDER.filter(t => t === filterTag && grouped[t])) {
     if (!grouped[tag]?.length) continue;
     const emoji = TAG_EMOJI[tag] || '🔹';
-    text += `━━━ ${emoji} *${displayTag(tag, true)}* ━━━\n`;
+    text += `━━━ ${emoji} *${displayTag(tag)}* ━━━\n`;
 
     for (const h of grouped[tag]) {
       const usages = h.help || [];
@@ -95,13 +102,6 @@ let handler = async (m, { args, isOwner }) => {
       }
     }
     text += '\n';
-  }
-
-  // Footer
-  if (!filterTag) {
-    text += `💡 *${p}help <tag>* — filter kategori\n`;
-    text += `💡 *${p}help <command>* — detail command\n`;
-    text += `\nTag: ${TAG_ORDER.filter(t => grouped[t]).map(t => `*${displayTag(t)}*`).join(' | ')}`;
   }
 
   return m.reply(text.trim());

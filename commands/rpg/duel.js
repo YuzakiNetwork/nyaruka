@@ -110,8 +110,8 @@ let handler = async (m, { args }) => {
   if (rawTarget === m.sender) return m.reply(`❌ Tidak bisa duel dengan diri sendiri.`);
   const target = getPlayer(rawTarget);
   if (!target) return m.reply(
-    `❌ Pemain tersebut belum bergabung di Nyaruka.\n` +
-    `Minta dia membuat karakter dulu dengan *!register <name> <class>*.`
+    `❌ Pemain itu belum bergabung di Nyaruka.\n` +
+    `Ajak dia membuat karakter dengan *!register <name> <class>*, lalu coba lagi.`
   );
 
   pendingDuels.delete(m.sender);

@@ -20,7 +20,7 @@ let handler = async (m, { args }) => {
 
   if (!amount || isNaN(amount)) {
     return m.reply(
-      `🎰 *Uji Keberuntungan*\n\n` +
+      `🎲 *Uji Peruntungan*\n\n` +
       `Mode permainan:\n` +
       `  🪙 *!gamble coinflip <jumlah>* — 50/50, menang 2×\n` +
       `  🎲 *!gamble dice <jumlah>* — tebak genap/ganjil, menang 1.8×\n` +
