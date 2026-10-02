@@ -27,6 +27,5 @@
     "node": ">=20.0.0"
   },
   "keywords": ["whatsapp", "bot", "rpg", "baileys", "anti-spam"],
-  "author": "RPG Bot Team",
   "license": "MIT"
 }
