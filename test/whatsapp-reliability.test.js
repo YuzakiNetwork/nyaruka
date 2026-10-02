@@ -22,6 +22,8 @@ import {
   quarantineSession,
   retryFailedCredentialSave,
   retryFailedKeyWrites,
+  runConnectStage,
+  waitForKeyWriteQueueDrain,
 } from '../lib/whatsapp/reliability.js';
 
 const tempRoots = new Set();
@@ -610,6 +612,239 @@ test('Signal-key queue recovery times out as unhealthy instead of hanging or all
   assert.ok(Date.now() - startedAt < 500);
   assert.equal(queue.dirty, true);
   assert.equal(queue.recoveryBlocked, true);
+});
+
+test('terminal logout preempts a connect waiting on key recovery, quarantines once, then continues pairing once', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const queue = { current: Promise.resolve() };
+  const timers = makeFakeTimers();
+  const firstSocket = { id: 'socket-before-terminal-during-key-repair' };
+  const unsafeSocket = { id: 'must-not-start-before-quarantine' };
+  const pairingSocket = { id: 'pairing-socket-after-quarantine' };
+  let rejectInitialWrite;
+  let resolveRepair;
+  let signalInitialWrite;
+  let signalRecoveryStart;
+  let signalRepairStart;
+  const initialWriteStarted = new Promise((resolve) => { signalInitialWrite = resolve; });
+  const recoveryStarted = new Promise((resolve) => { signalRecoveryStart = resolve; });
+  const repairStarted = new Promise((resolve) => { signalRepairStart = resolve; });
+  let keySaveCalls = 0;
+  let connectCalls = 0;
+  let authLoads = 0;
+  let socketStarts = 0;
+  let quarantineCalls = 0;
+  let pairingRequired = 0;
+  let quarantinePath;
+  const diagnostics = [];
+  const reconnectLog = makeReconnectLogCapture();
+  const keys = createQueuedKeyStore({
+    get: async () => ({}),
+    set: async () => {
+      keySaveCalls += 1;
+      if (keySaveCalls === 1) {
+        signalInitialWrite();
+        return new Promise((_resolve, reject) => { rejectInitialWrite = reject; });
+      }
+      if (keySaveCalls === 2) {
+        signalRepairStart();
+        return new Promise((resolve) => { resolveRepair = resolve; });
+      }
+    },
+  }, { queue, isActive: () => true });
+  const controller = createReconnectController({
+    connect: async (_registerSocket, { signal }) => {
+      connectCalls += 1;
+      if (connectCalls === 1) {
+        authLoads += 1;
+        socketStarts += 1;
+        return firstSocket;
+      }
+      if (connectCalls === 2) {
+        signalRecoveryStart();
+        const healthy = await runConnectStage(
+          signal,
+          () => retryFailedKeyWrites(queue, { timeoutMs: 1_000 }),
+        );
+        if (!healthy) throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
+        authLoads += 1;
+        socketStarts += 1;
+        return unsafeSocket;
+      }
+      if (connectCalls === 3) {
+        const healthy = await runConnectStage(signal, async () => true);
+        assert.equal(healthy, true);
+        authLoads += 1;
+        socketStarts += 1;
+        return pairingSocket;
+      }
+      throw new Error('unexpected extra connect attempt');
+    },
+    closeSocket: async () => true,
+    quarantine: async () => {
+      quarantineCalls += 1;
+      if (!(await waitForKeyWriteQueueDrain(queue, { timeoutMs: 1_000 }))) {
+        throw new Error('Signal-key writes did not drain before quarantine');
+      }
+      quarantinePath = quarantineSession(sessionDirectory, { now: () => 223344 });
+      if (quarantinePath) discardFailedKeyWritesAfterSessionReset(queue);
+      return quarantinePath;
+    },
+    onPairingRequired: () => { pairingRequired += 1; },
+    onDiagnostic: (event, details) => {
+      diagnostics.push({ event, details });
+      logReconnectDiagnostic(reconnectLog.logger, event, details);
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  const activeWrite = keys.set({ session: { synthetic: 'terminal-race test marker' } });
+  await initialWriteStarted;
+  await controller.handleDisconnect(firstSocket, { output: { statusCode: 408 } });
+  await timers.fireNext();
+  await recoveryStarted;
+
+  const logout = controller.handleDisconnect(firstSocket, baileysFailure401());
+  assert.equal(queue.recoveryBlocked, true);
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+  assert.equal(quarantineCalls, 0);
+
+  rejectInitialWrite(new Error('synthetic key write rejected during terminal logout'));
+  await assert.rejects(activeWrite, /synthetic key write rejected during terminal logout/);
+  await repairStarted;
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+  assert.equal(quarantineCalls, 0);
+  assert.equal(queue.pendingWrites.length, 1);
+  assert.equal(controller.getSocket(), null);
+
+  resolveRepair();
+  assert.equal(await logout, true);
+  assert.equal(quarantineCalls, 1);
+  assert.equal(pairingRequired, 1);
+  assert.ok(quarantinePath);
+  assert.equal(fs.readFileSync(path.join(quarantinePath, 'creds.json'), 'utf8'), originalContents);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.deepEqual(fs.readdirSync(sessionDirectory), []);
+  assert.equal(queue.dirty, false);
+  assert.deepEqual(queue.pendingWrites, []);
+  assert.equal(authLoads, 1);
+  assert.equal(socketStarts, 1);
+  assert.equal(diagnostics.filter(({ event }) => event === 'session_quarantined').length, 1);
+  assert.deepEqual(
+    diagnostics.filter(({ event }) => event === 'retry_scheduled').map(({ details }) => details.reason),
+    ['transient', 'pairing'],
+  );
+  const logoutMessageIndex = reconnectLog.messages.indexOf(
+    '🔐 WhatsApp melaporkan sesi telah keluar. Pairing ulang diperlukan untuk menyambungkan kembali.',
+  );
+  const resetMessageIndex = reconnectLog.messages.indexOf('🧹 Sesi lokal sudah direset. Pairing ulang diperlukan.');
+  assert.ok(logoutMessageIndex >= 0);
+  assert.ok(resetMessageIndex > logoutMessageIndex);
+
+  await timers.fireNext();
+  assert.equal(await controller.connect(), pairingSocket);
+  assert.equal(connectCalls, 3);
+  assert.equal(authLoads, 2);
+  assert.equal(socketStarts, 2);
+  assert.equal(controller.getSocket(), pairingSocket);
+  assert.equal(diagnostics.filter(({ event, details }) => event === 'retry_scheduled' && details.reason === 'pairing').length, 1);
+});
+
+test('terminal logout timeout preserves auth and reports quarantine failure without pairing/reset claims', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const queue = { current: Promise.resolve() };
+  const timers = makeFakeTimers();
+  const socket = { id: 'socket-before-key-drain-timeout' };
+  let releaseWrite;
+  let signalWriteStarted;
+  let signalRecoveryStarted;
+  const writeStarted = new Promise((resolve) => { signalWriteStarted = resolve; });
+  const recoveryStarted = new Promise((resolve) => { signalRecoveryStarted = resolve; });
+  let authLoads = 0;
+  let connectCalls = 0;
+  let quarantineCalls = 0;
+  let resetCalls = 0;
+  let pairingRequired = 0;
+  const diagnostics = [];
+  const reconnectLog = makeReconnectLogCapture();
+  const keys = createQueuedKeyStore({
+    get: async () => ({}),
+    set: async () => {
+      signalWriteStarted();
+      return new Promise((resolve) => { releaseWrite = resolve; });
+    },
+  }, { queue, isActive: () => true });
+  const controller = createReconnectController({
+    connect: async (_registerSocket, { signal }) => {
+      connectCalls += 1;
+      if (connectCalls === 1) {
+        authLoads += 1;
+        return socket;
+      }
+      signalRecoveryStarted();
+      const healthy = await runConnectStage(
+        signal,
+        () => retryFailedKeyWrites(queue, { timeoutMs: 15 }),
+      );
+      if (!healthy) throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
+      authLoads += 1;
+      return { id: 'must-not-start-after-timeout' };
+    },
+    closeSocket: async () => true,
+    quarantine: async () => {
+      quarantineCalls += 1;
+      if (!(await waitForKeyWriteQueueDrain(queue, { timeoutMs: 15 }))) {
+        throw new Error('Signal-key writes did not reach a safe quarantine boundary');
+      }
+      resetCalls += 1;
+      const moved = quarantineSession(sessionDirectory, { now: () => 334455 });
+      if (moved) discardFailedKeyWritesAfterSessionReset(queue);
+      return moved;
+    },
+    onPairingRequired: () => { pairingRequired += 1; },
+    onDiagnostic: (event, details) => {
+      diagnostics.push({ event, details });
+      logReconnectDiagnostic(reconnectLog.logger, event, details);
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  const activeWrite = keys.set({ session: { synthetic: 'timeout-preserve marker' } });
+  await writeStarted;
+  await controller.handleDisconnect(socket, { output: { statusCode: 408 } });
+  await timers.fireNext();
+  await recoveryStarted;
+  assert.equal(await controller.handleDisconnect(socket, baileysFailure401()), false);
+
+  assert.equal(authLoads, 1);
+  assert.equal(connectCalls, 2);
+  assert.equal(quarantineCalls, 1);
+  assert.equal(resetCalls, 0);
+  assert.equal(pairingRequired, 0);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+  assert.equal(fs.readdirSync(path.dirname(sessionDirectory)).some((name) => name.includes('.quarantine-')), false);
+  assert.equal(diagnostics.filter(({ event }) => event === 'session_quarantine_failed').length, 1);
+  assert.equal(diagnostics.some(({ event }) => event === 'session_quarantined'), false);
+  assert.equal(reconnectLog.messages.includes('🧹 Sesi lokal sudah direset. Pairing ulang diperlukan.'), false);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared && !timer.fired).length, 0);
+  assert.equal(await controller.connect(), null);
+
+  releaseWrite();
+  await activeWrite;
+  assert.equal(queue.dirty, true);
+  assert.equal(queue.recoveryBlocked, true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
 });
 
 test('logout drains in-flight Signal-key writes and skips queued writes from the stale socket', async () => {

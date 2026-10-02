@@ -24,13 +24,15 @@ import {
   createCredentialPersister,
   createQueuedKeyStore,
   createReconnectController,
+  assertConnectAttemptActive,
   discardFailedCredentialSaveAfterSessionReset,
   discardFailedKeyWritesAfterSessionReset,
-  hasInFlightKeyWriteRecovery,
   quarantineSession,
   retryFailedCredentialSave,
   retryFailedKeyWrites,
+  runConnectStage,
   sanitizeDiagnostic,
+  waitForKeyWriteQueueDrain,
 } from './lib/whatsapp/reliability.js';
 import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
@@ -72,9 +74,9 @@ const reconnect = createReconnectController({
   quarantine: async () => {
     // Baileys writes creds and Signal keys to the configured path; drain both
     // queues before moving that path so no old write can repopulate a new session.
-    await Promise.all([credentialWriteQueue.current, keyWriteQueue.current]);
-    if (hasInFlightKeyWriteRecovery(keyWriteQueue)) {
-      throw new Error('Signal-key recovery is still in flight; refusing to reset auth state');
+    await credentialWriteQueue.current;
+    if (!(await waitForKeyWriteQueueDrain(keyWriteQueue))) {
+      throw new Error('Signal-key recovery did not reach a safe boundary; preserving auth state');
     }
     const quarantinePath = quarantineSession(SESSION_DIR);
     if (quarantinePath) {
@@ -164,17 +166,19 @@ async function requestPairingCode(sock) {
 
 // ── WhatsApp Connection ───────────────────────────────────────────────────────
 
-async function connectWhatsApp(registerSocket) {
-  if (!(await retryFailedCredentialSave(credentialWriteQueue))) {
+async function connectWhatsApp(registerSocket, { signal, closeCandidate } = {}) {
+  assertConnectAttemptActive(signal);
+  if (!(await runConnectStage(signal, () => retryFailedCredentialSave(credentialWriteQueue)))) {
     throw Object.assign(new Error('Credential save remains pending'), { code: 'EAGAIN' });
   }
-  if (!(await retryFailedKeyWrites(keyWriteQueue))) {
+  if (!(await runConnectStage(signal, () => retryFailedKeyWrites(keyWriteQueue)))) {
     throw Object.assign(new Error('Signal-key save remains pending'), { code: 'EAGAIN' });
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+  const { state, saveCreds } = await runConnectStage(signal, () => useMultiFileAuthState(SESSION_DIR));
 
-  const { version, isLatest } = await fetchLatestBaileysVersion();
+  const { version, isLatest } = await runConnectStage(signal, () => fetchLatestBaileysVersion());
+  assertConnectAttemptActive(signal);
   logger.info({ version: version.join('.'), isLatest }, '📡 WA version');
 
   const baileyLogger = pino({ level: 'silent' });
@@ -207,7 +211,11 @@ async function connectWhatsApp(registerSocket) {
   });
   trackWhatsAppSocket(sock);
 
-  if (!registerSocket(sock)) throw new Error('WhatsApp socket registration rejected');
+  if (signal?.aborted || !registerSocket(sock)) {
+    await (closeCandidate ? closeCandidate(sock) : closeWhatsAppSocket(sock));
+    assertConnectAttemptActive(signal);
+    throw new Error('WhatsApp socket registration rejected');
+  }
   socketRegistered = true;
 
   sock.ws.on('error', (err) => {
