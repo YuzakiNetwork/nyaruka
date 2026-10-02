@@ -1169,6 +1169,105 @@ test('fatal process handlers await cleanup and exit nonzero for both fatal event
   }
 });
 
+test('fatal shutdown bounds a blocked connect and closes a late candidate without activating it', async () => {
+  const processObject = new EventEmitter();
+  const order = [];
+  const diagnostics = [];
+  const lateSocket = { id: 'socket-created-after-shutdown-timeout' };
+  let resolveCandidate;
+  let signalConnectStarted;
+  const candidateGate = new Promise((resolve) => { resolveCandidate = resolve; });
+  const connectStarted = new Promise((resolve) => { signalConnectStarted = resolve; });
+  let attemptSignal;
+  let registerResult;
+  let closeCalls = 0;
+
+  const controller = createReconnectController({
+    connect: async (registerSocket, { signal }) => {
+      attemptSignal = signal;
+      signalConnectStarted();
+      const socket = await candidateGate;
+      registerResult = registerSocket(socket);
+      return socket;
+    },
+    closeSocket: async (socket) => {
+      assert.equal(socket, lateSocket);
+      closeCalls += 1;
+      return true;
+    },
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    shutdownTimeoutMs: 25,
+  });
+  const connection = controller.connect();
+  let connectionSettled = false;
+  void connection.then(() => { connectionSettled = true; });
+  await connectStarted;
+
+  processObject.exit = (code) => order.push(`exit:${code}`);
+  const logger = {
+    fatal: (_details, message) => order.push(`fatal:${message}`),
+    error: (_details, message) => order.push(`error:${message}`),
+  };
+  const handlers = installFatalProcessHandlers({
+    processObject,
+    logger,
+    cleanup: () => controller.close(),
+  });
+  const failure = new Error('synthetic fatal shutdown during connect');
+  processObject.emit('uncaughtException', failure);
+  await handlers.handleFatalError(failure, 'uncaughtException');
+
+  assert.equal(attemptSignal.aborted, true);
+  assert.equal(connectionSettled, false);
+  assert.equal(controller.getSocket(), null);
+  assert.equal(await controller.connect(), null);
+  assert.equal(await controller.resume(), null);
+  assert.deepEqual(order, [
+    'fatal:Uncaught exception; shutting down after cleanup',
+    'error:Fatal shutdown cleanup incomplete; controller remains closed to late resources',
+    'exit:1',
+  ]);
+  assert.equal(diagnostics.filter(({ event }) => event === 'controller_close_incomplete').length, 1);
+
+  resolveCandidate(lateSocket);
+  assert.equal(await connection, null);
+  assert.equal(registerResult, false);
+  assert.equal(closeCalls, 1);
+  assert.equal(controller.getSocket(), null);
+  assert.equal(await controller.close(), false);
+  handlers.dispose();
+});
+
+test('controller shutdown reports complete only after the active socket closes', async () => {
+  const socket = { id: 'socket-shutdown-close-gate' };
+  let releaseClose;
+  let signalCloseStarted;
+  const closeStarted = new Promise((resolve) => { signalCloseStarted = resolve; });
+  const controller = createReconnectController({
+    connect: async () => socket,
+    closeSocket: () => {
+      signalCloseStarted();
+      return new Promise((resolve) => { releaseClose = resolve; });
+    },
+    shutdownTimeoutMs: 500,
+  });
+
+  assert.equal(await controller.connect(), socket);
+  const shutdown = controller.close();
+  await closeStarted;
+  let shutdownSettled = false;
+  void shutdown.then(() => { shutdownSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shutdownSettled, false);
+  assert.equal(controller.getSocket(), null);
+
+  releaseClose(true);
+  assert.equal(await shutdown, true);
+  assert.equal(shutdownSettled, true);
+  assert.equal(await controller.connect(), null);
+  assert.equal(await controller.resume(), null);
+});
+
 test('pairing codes stay on an interactive TTY and legacy Pino fields are redacted', async () => {
   const syntheticCode = 'TESTCODE1234';
   let redirectedOutput = '';
