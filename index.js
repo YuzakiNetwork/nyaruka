@@ -25,8 +25,11 @@ import {
   createQueuedKeyStore,
   createReconnectController,
   quarantineSession,
+  retryFailedCredentialSave,
   sanitizeDiagnostic,
 } from './lib/whatsapp/reliability.js';
+import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
+import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
 import { loadCommands, watchCommands, routeMessage, normalizeMessage, setContactStore, getCommandStats } from './handler/index.js';
 import { loadEconomy, economyTick, checkAndRotateWorldEvent } from './lib/game/economy.js';
 import { startPolling, stopPolling, setWASock as setDonateWASock } from './webhook/trakteer.js';
@@ -94,19 +97,7 @@ const reconnect = createReconnectController({
     clearPairingTimer();
     _pairingDone = false;
   },
-  onDiagnostic: (event, details) => {
-    if (event === 'retry_scheduled') {
-      logger.warn(details, 'WhatsApp reconnect scheduled');
-    } else if (event === 'session_quarantined') {
-      logger.warn(details, 'Confirmed logout; auth directory quarantined for re-pairing');
-    } else if (event === 'session_quarantine_failed') {
-      logger.error(details, 'Could not quarantine auth state; reconnect stopped to preserve it');
-    } else if (event === 'reconnect_stopped') {
-      logger.error(details, 'Reconnect stopped for a non-retryable disconnect; auth state preserved');
-    } else {
-      logger.warn({ event, ...details }, 'WhatsApp connection diagnostic');
-    }
-  },
+  onDiagnostic: (event, details) => logReconnectDiagnostic(logger, event, details),
 });
 
 // ── Startup ───────────────────────────────────────────────────────────────────
@@ -123,7 +114,7 @@ async function start() {
 
   // Tampilkan banner launching
   await printBanner({
-    version:       process.env.npm_package_version || '3.1.1',
+    version:       process.env.npm_package_version || '3.1.2',
     botName:       config.bot.name    || 'Nyaruka',
     prefix:        config.bot.prefix  || '!',
     ownerNumber:   process.env.BOT_OWNER_NUMBER || process.env.BOT_OWNER_LID || 'Belum diset',
@@ -163,22 +154,13 @@ async function requestPairingCode(sock) {
   try {
     logger.info('🔑 Requesting pairing code...');
     const code      = await sock.requestPairingCode(phone);
-    const formatted = code?.match(/.{1,4}/g)?.join('-') ?? code;
-
-    console.log('\n\x1b[33m╔════════════════════════════════════════╗');
-    console.log('║        🔑  PAIRING CODE BOT             ║');
-    console.log('╠════════════════════════════════════════╣');
-    console.log(`║                                        ║`);
-    console.log(`║      \x1b[1m\x1b[37m${formatted}\x1b[0m\x1b[33m                     ║`);
-    console.log(`║                                        ║`);
-    console.log('║  1. Buka WhatsApp di HP                ║');
-    console.log('║  2. Setelan → Perangkat Tertaut        ║');
-    console.log('║  3. Tautkan Perangkat                  ║');
-    console.log('║  4. Tautkan dengan nomor telepon       ║');
-    console.log(`║  5. Masukkan: \x1b[1m\x1b[37m${formatted}\x1b[0m\x1b[33m               ║`);
-    console.log('╚════════════════════════════════════════╝\x1b[0m\n');
-
-    logger.info({ code: formatted }, '🔑 Pairing code displayed');
+    const displayed = writePairingCodeToTerminal(code);
+    logger.info(
+      { event: displayed ? 'pairing_code_displayed' : 'pairing_code_withheld' },
+      displayed
+        ? 'Pairing code displayed on attached terminal'
+        : 'Pairing code withheld because no interactive terminal is attached',
+    );
   } catch (err) {
     _pairingDone = false;
     logger.error(sanitizeDiagnostic(err), 'Pairing code request failed');
@@ -193,6 +175,10 @@ async function requestPairingCode(sock) {
 // ── WhatsApp Connection ───────────────────────────────────────────────────────
 
 async function connectWhatsApp(registerSocket) {
+  if (!(await retryFailedCredentialSave(credentialWriteQueue))) {
+    throw Object.assign(new Error('Credential save remains pending'), { code: 'EAGAIN' });
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
   const { version, isLatest } = await fetchLatestBaileysVersion();
