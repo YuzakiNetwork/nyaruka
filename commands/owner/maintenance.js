@@ -26,7 +26,7 @@ let handler = async (m, { args, command }) => {
     const sub = args[0]?.toLowerCase();
     if (sub === 'on' || sub === 'aktif') {
       _maintenanceMode = true;
-      return m.reply(`🔧 *Maintenance mode: ON*\nSemua command RPG dinonaktifkan sementara.`);
+      return m.reply(`🛠️ Nyaruka sedang istirahat sebentar. Coba lagi nanti, ya.`);
     }
     if (sub === 'off' || sub === 'mati') {
       _maintenanceMode = false;

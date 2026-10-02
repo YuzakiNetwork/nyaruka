@@ -14,7 +14,10 @@ let handler = async (m, { args }) => {
   if (!targetJid) return m.reply(`Usage: *!inspect @player*`);
 
   const target = getPlayer(targetJid);
-  if (!target) return m.reply(`❌ Player belum terdaftar di RPG.`);
+  if (!target) return m.reply(
+    `❌ Pemain tersebut belum punya karakter di Nyaruka.\n` +
+    `Minta dia membuat karakter dulu dengan *!register <name> <class>*.`
+  );
 
   const equipped = Object.entries(target.equipment || {})
     .filter(([, id]) => id)
