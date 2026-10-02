@@ -1,0 +1,60 @@
+{
+  "99961203114224@lid": {
+    "id": "99961203114224@lid",
+    "name": "Gura",
+    "class": "Mage",
+    "rank": "E",
+    "reputation": 0,
+    "level": 1,
+    "exp": 0,
+    "expToNext": 100,
+    "hp": 80,
+    "maxHp": 80,
+    "mana": 200,
+    "maxMana": 200,
+    "attack": 25,
+    "defense": 6,
+    "speed": 12,
+    "gold": 100,
+    "inventory": [],
+    "equipment": {
+      "weapon": null,
+      "armor": null,
+      "accessory": null,
+      "helmet": null
+    },
+    "skills": [
+      "fireball",
+      "arcane_bolt"
+    ],
+    "skillCooldowns": {},
+    "activeQuest": null,
+    "completedQuests": [],
+    "job": "Mage",
+    "stats": {
+      "monstersKilled": 0,
+      "dungeonsCleared": 0,
+      "pvpWins": 0,
+      "pvpLosses": 0,
+      "wins": 0,
+      "losses": 0,
+      "bossesKilled": [],
+      "worldBossKills": 0,
+      "totalDmgDealt": 0,
+      "craftCount": 0
+    },
+    "earnedTitles": [],
+    "activeTitle": null,
+    "guildId": null,
+    "guildRole": null,
+    "gachaPity": 0,
+    "summonCooldown": {},
+    "activeSummon": null,
+    "dungeon": null,
+    "statusEffects": [],
+    "dailyStreak": 0,
+    "lastDaily": 0,
+    "lastActive": 1790860724623,
+    "createdAt": 1790860724623
+  }
+}
