@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-rpg-bot",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Bot WhatsApp Nyaruka dengan karakter, petualangan, duel, dan eksplorasi.",
   "type": "module",
   "main": "index.js",
