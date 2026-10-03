@@ -36,7 +36,7 @@ const EVENTS = [
     id: 'wandering_merchant', weight: 6,
     emoji: '🧙', title: 'Pedagang Kelana',
     fn: async (player) => {
-      const items = ['health_potion', 'mana_elixir', 'antidote', 'ancient_rune'];
+      const items = ['health_potion', 'mana_elixir', 'antidote', 'wolf_fang', 'ancient_rune'];
       const itemId = pick(items);
       const qty    = randInt(1, 3);
       addItem(player, itemId, qty);
