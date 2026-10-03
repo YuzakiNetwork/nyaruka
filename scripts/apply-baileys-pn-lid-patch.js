@@ -109,6 +109,18 @@ function removeOwnedTemporaryFile(tempPath, identity) {
   }
 }
 
+function removeOwnedTemporaryDirectory(tempDirectory, identity) {
+  if (!identity) return;
+  const candidate = lstatSync(tempDirectory);
+  if (!candidate.isDirectory()
+    || candidate.isSymbolicLink()
+    || candidate.dev !== identity.dev
+    || candidate.ino !== identity.ino) {
+    throw new Error('Baileys patch temp directory changed; refusing to remove it.');
+  }
+  rmdirSync(tempDirectory);
+}
+
 export function replaceDecoderAtomically(decoderPath, contents) {
   const initialTarget = lstatSync(decoderPath);
   if (!initialTarget.isFile() || initialTarget.isSymbolicLink()) {
@@ -119,9 +131,15 @@ export function replaceDecoderAtomically(decoderPath, contents) {
   const temporaryPath = join(temporaryDirectory, 'decode-wa-message.js');
   let descriptor;
   let temporaryIdentity;
+  let temporaryDirectoryIdentity;
   let renamed = false;
 
   try {
+    const createdDirectory = lstatSync(temporaryDirectory);
+    if (!createdDirectory.isDirectory() || createdDirectory.isSymbolicLink()) {
+      throw new Error('Baileys patch temp directory is not a regular directory.');
+    }
+    temporaryDirectoryIdentity = { dev: createdDirectory.dev, ino: createdDirectory.ino };
     chmodSync(temporaryDirectory, 0o700);
     descriptor = openSync(temporaryPath, 'wx', 0o600);
     const createdFile = fstatSync(descriptor);
@@ -142,7 +160,7 @@ export function replaceDecoderAtomically(decoderPath, contents) {
 
     renameSync(temporaryPath, decoderPath);
     renamed = true;
-    rmdirSync(temporaryDirectory);
+    removeOwnedTemporaryDirectory(temporaryDirectory, temporaryDirectoryIdentity);
   } catch (error) {
     if (descriptor !== undefined) {
       try {
@@ -155,9 +173,9 @@ export function replaceDecoderAtomically(decoderPath, contents) {
       removeOwnedTemporaryFile(temporaryPath, temporaryIdentity);
     }
     try {
-      rmdirSync(temporaryDirectory);
+      removeOwnedTemporaryDirectory(temporaryDirectory, temporaryDirectoryIdentity);
     } catch {
-      // Only an empty directory created by this run is eligible for removal.
+      // A replaced, non-empty, or otherwise unremovable directory is never removed.
     }
     throw error;
   }
