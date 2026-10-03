@@ -20,6 +20,7 @@ import { config }    from './config.js';
 import { initDatabase } from './lib/database/db.js';
 import { printBanner, printConnected, printReconnecting } from './lib/utils/banner.js';
 import { logger }    from './lib/utils/logger.js';
+import { installLibsignalBadMacLogDeduper } from './lib/utils/libsignal-log-dedupe.js';
 import {
   createCredentialPersister,
   createQueuedKeyStore,
@@ -127,7 +128,7 @@ async function start() {
 
   // Tampilkan banner launching
   await printBanner({
-    version:       process.env.npm_package_version || '3.1.2',
+    version:       process.env.npm_package_version || '3.1.3',
     botName:       config.bot.name    || 'Nyaruka',
     prefix:        config.bot.prefix  || '!',
     ownerNumber:   process.env.BOT_OWNER_NUMBER || process.env.BOT_OWNER_LID || 'Belum diset',
@@ -384,6 +385,8 @@ function startCronJobs(sock) {
 }
 
 // ── Guards ────────────────────────────────────────────────────────────────────
+
+installLibsignalBadMacLogDeduper({ logger });
 
 installFatalProcessHandlers({
   processObject: process,
