@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
+  closeSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
   renameSync,
-  statSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -86,6 +94,75 @@ function replaceExactlyOnce(source, expected, replacement, label) {
   return `${source.slice(0, first)}${replacement}${source.slice(first + expected.length)}`;
 }
 
+function removeOwnedTemporaryFile(tempPath, identity) {
+  if (!identity) return;
+  try {
+    const candidate = lstatSync(tempPath);
+    if (candidate.isFile()
+      && !candidate.isSymbolicLink()
+      && candidate.dev === identity.dev
+      && candidate.ino === identity.ino) {
+      unlinkSync(tempPath);
+    }
+  } catch {
+    // Missing, replaced, or otherwise unremovable paths are never followed or recursively removed.
+  }
+}
+
+export function replaceDecoderAtomically(decoderPath, contents) {
+  const initialTarget = lstatSync(decoderPath);
+  if (!initialTarget.isFile() || initialTarget.isSymbolicLink()) {
+    throw new Error('Refusing to replace a non-regular Baileys decoder file.');
+  }
+  const targetMode = initialTarget.mode & 0o777;
+  const temporaryDirectory = mkdtempSync(join(dirname(decoderPath), '.baileys-pn-lid-'));
+  const temporaryPath = join(temporaryDirectory, 'decode-wa-message.js');
+  let descriptor;
+  let temporaryIdentity;
+  let renamed = false;
+
+  try {
+    chmodSync(temporaryDirectory, 0o700);
+    descriptor = openSync(temporaryPath, 'wx', 0o600);
+    const createdFile = fstatSync(descriptor);
+    temporaryIdentity = { dev: createdFile.dev, ino: createdFile.ino };
+    writeFileSync(descriptor, contents, { encoding: 'utf8' });
+    fchmodSync(descriptor, targetMode);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+
+    const currentTarget = lstatSync(decoderPath);
+    if (!currentTarget.isFile()
+      || currentTarget.isSymbolicLink()
+      || currentTarget.dev !== initialTarget.dev
+      || currentTarget.ino !== initialTarget.ino) {
+      throw new Error('Baileys decoder changed during patching; refusing to replace it.');
+    }
+
+    renameSync(temporaryPath, decoderPath);
+    renamed = true;
+    rmdirSync(temporaryDirectory);
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Preserve the original patching error.
+      }
+    }
+    if (!renamed) {
+      removeOwnedTemporaryFile(temporaryPath, temporaryIdentity);
+    }
+    try {
+      rmdirSync(temporaryDirectory);
+    } catch {
+      // Only an empty directory created by this run is eligible for removal.
+    }
+    throw error;
+  }
+}
+
 export function transformDecoderSource(source) {
   const sourceHash = sha256(source);
   if (sourceHash === PATCHED_SOURCE_SHA256) {
@@ -108,7 +185,7 @@ export function transformDecoderSource(source) {
 
 const defaultProjectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-export function applyBaileysPatch(projectRoot = defaultProjectRoot) {
+export function applyBaileysPatch(projectRoot = defaultProjectRoot, sourceTransformer = transformDecoderSource) {
   const packageRoot = join(projectRoot, 'node_modules', '@whiskeysockets', 'baileys');
   const packageJsonPath = join(packageRoot, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
@@ -118,24 +195,12 @@ export function applyBaileysPatch(projectRoot = defaultProjectRoot) {
 
   const decoderPath = join(packageRoot, 'lib', 'Utils', 'decode-wa-message.js');
   const originalSource = readFileSync(decoderPath, 'utf8');
-  const { source: patchedSource, changed } = transformDecoderSource(originalSource);
+  const { source: patchedSource, changed } = sourceTransformer(originalSource);
   if (!changed) {
     return false;
   }
 
-  const temporaryPath = `${decoderPath}.${process.pid}.tmp`;
-  const mode = statSync(decoderPath).mode & 0o777;
-  try {
-    writeFileSync(temporaryPath, patchedSource, { encoding: 'utf8', mode });
-    renameSync(temporaryPath, decoderPath);
-  } catch (error) {
-    try {
-      unlinkSync(temporaryPath);
-    } catch {
-      // Keep the original write/rename error.
-    }
-    throw error;
-  }
+  replaceDecoderAtomically(decoderPath, patchedSource);
   return true;
 }
 
