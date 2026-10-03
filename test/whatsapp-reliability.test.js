@@ -124,6 +124,166 @@ test('408 and WebSocket timeouts retry without quarantining or modifying auth', 
   assert.equal(/logout|corrupt|clear|reset|keluar|rusak/i.test(JSON.stringify(reconnectLog.entries)), false);
 });
 
+test('500 badSession retries with backoff while preserving auth and avoiding pairing', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  const reconnectLog = makeReconnectLogCapture();
+  const socket = { id: 'socket-bad-session-retry' };
+  let quarantineCalls = 0;
+  let pairingRequired = 0;
+  const controller = createReconnectController({
+    connect: async () => socket,
+    closeSocket: async () => {},
+    quarantine: async () => { quarantineCalls += 1; },
+    onPairingRequired: () => { pairingRequired += 1; },
+    onDiagnostic: (event, details) => {
+      diagnostics.push({ event, details });
+      logReconnectDiagnostic(reconnectLog.logger, event, details);
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  assert.equal(classifyDisconnect({ output: { statusCode: 500 } }), 'retry');
+  await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+
+  const retry = diagnostics.find(({ event }) => event === 'retry_scheduled');
+  assert.deepEqual(retry.details, {
+    attempt: 1,
+    statusCode: 500,
+    badSessionAttempt: 1,
+    retryLimit: 3,
+    delayMs: 500,
+    reason: 'bad_session',
+  });
+  assert.equal(quarantineCalls, 0);
+  assert.equal(pairingRequired, 0);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared).length, 1);
+  assert.equal(reconnectLog.messages[0], 'WhatsApp disconnected (500/badSession). Retrying in 0.5s (1/3); auth state preserved.');
+});
+
+test('408 and 503 remain on the existing transient retry path', async () => {
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  let connectCalls = 0;
+  let quarantineCalls = 0;
+  const controller = createReconnectController({
+    connect: async () => ({ id: `socket-transient-${++connectCalls}` }),
+    closeSocket: async () => {},
+    quarantine: async () => { quarantineCalls += 1; },
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  let socket = controller.getSocket();
+  for (const [index, statusCode] of [408, 503].entries()) {
+    assert.equal(classifyDisconnect({ output: { statusCode } }), 'retry');
+    await controller.handleDisconnect(socket, { output: { statusCode } });
+    const retry = diagnostics.filter(({ event }) => event === 'retry_scheduled').at(-1).details;
+    assert.equal(retry.reason, 'transient');
+    assert.equal(retry.badSessionAttempt, undefined);
+    assert.equal(retry.retryLimit, undefined);
+    assert.equal(retry.delayMs, index === 0 ? 500 : 1_000);
+    await timers.fireNext();
+    socket = controller.getSocket();
+  }
+
+  assert.equal(connectCalls, 3);
+  assert.equal(quarantineCalls, 0);
+  assert.equal(diagnostics.some(({ event }) => event === 'reconnect_stopped'), false);
+});
+
+test('a recovered open resets the badSession retry budget', async () => {
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  let connectCalls = 0;
+  const controller = createReconnectController({
+    connect: async () => ({ id: `socket-recovery-${++connectCalls}` }),
+    closeSocket: async () => {},
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  let socket = controller.getSocket();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+    await timers.fireNext();
+    socket = controller.getSocket();
+  }
+
+  assert.equal(controller.markOpen(socket), true);
+  await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+
+  const retries = diagnostics.filter(({ event }) => event === 'retry_scheduled').map(({ details }) => details);
+  assert.deepEqual(retries.map(({ badSessionAttempt }) => badSessionAttempt), [1, 2, 1]);
+  assert.deepEqual(retries.map(({ attempt }) => attempt), [1, 2, 1]);
+  assert.equal(diagnostics.some(({ event }) => event === 'reconnect_stopped'), false);
+});
+
+test('persistent 500 badSession stops after three retries without deleting auth or requesting pairing', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  const reconnectLog = makeReconnectLogCapture();
+  let connectCalls = 0;
+  let quarantineCalls = 0;
+  let pairingRequired = 0;
+  const controller = createReconnectController({
+    connect: async () => ({ id: `socket-persistent-bad-session-${++connectCalls}` }),
+    closeSocket: async () => {},
+    quarantine: async () => { quarantineCalls += 1; },
+    onPairingRequired: () => { pairingRequired += 1; },
+    onDiagnostic: (event, details) => {
+      diagnostics.push({ event, details });
+      logReconnectDiagnostic(reconnectLog.logger, event, details);
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  let socket = controller.getSocket();
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+    await timers.fireNext();
+    socket = controller.getSocket();
+  }
+  await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+
+  const retries = diagnostics.filter(({ event }) => event === 'retry_scheduled').map(({ details }) => details);
+  const stopped = diagnostics.find(({ event }) => event === 'reconnect_stopped');
+  assert.deepEqual(retries.map(({ badSessionAttempt }) => badSessionAttempt), [1, 2, 3]);
+  assert.deepEqual(retries.map(({ delayMs }) => delayMs), [500, 1_000, 2_000]);
+  assert.deepEqual(stopped.details, {
+    errorType: 'Error',
+    statusCode: 500,
+    reason: 'bad_session_retry_limit',
+    retryLimit: 3,
+  });
+  assert.equal(connectCalls, 4);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared && !timer.fired).length, 0);
+  assert.equal(quarantineCalls, 0);
+  assert.equal(pairingRequired, 0);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.equal(fs.readFileSync(credsPath, 'utf8'), originalContents);
+  assert.equal(fs.readdirSync(path.dirname(sessionDirectory)).some((name) => name.includes('.quarantine-')), false);
+  assert.equal(reconnectLog.messages.at(-1), 'Reconnect stopped after 3 retries for 500/badSession. Auth state preserved; inspect diagnostics before re-pairing.');
+});
+
 test('only explicit loggedOut quarantines auth; bare 401 and ambiguous errors do not', async () => {
   const { sessionDirectory, credsPath } = makeSessionDirectory();
   const originalContents = fs.readFileSync(credsPath, 'utf8');
