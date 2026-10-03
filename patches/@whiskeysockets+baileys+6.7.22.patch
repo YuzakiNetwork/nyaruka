@@ -1,0 +1,61 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js b/node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js
+index 56594af..f63405a 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js
+@@ -1,6 +1,6 @@
+ import { Boom } from '@hapi/boom';
+ import { proto } from '../../WAProto/index.js';
+-import { areJidsSameUser, isJidBroadcast, isJidGroup, isJidMetaIa, isJidNewsletter, isJidStatusBroadcast, isJidUser, isLidUser } from '../WABinary/index.js';
++import { areJidsSameUser, isJidBroadcast, isJidGroup, isJidMetaIa, isJidNewsletter, isJidStatusBroadcast, isJidUser, isLidUser, jidNormalizedUser } from '../WABinary/index.js';
+ import { unpadRandomMax16 } from './generics.js';
+ export const NO_MESSAGE_FOUND_ERROR_TEXT = 'Message absent from node';
+ export const MISSING_KEYS_ERROR_TEXT = 'Key used already or never filled';
+@@ -141,14 +141,42 @@ export const decryptMessageNode = (stanza, meId, meLid, repository, logger) => {
+                                 });
+                                 break;
+                             case 'pkmsg':
+-                            case 'msg':
++                            case 'msg': {
+                                 const user = isJidUser(sender) ? sender : author;
+-                                msgBuffer = await repository.decryptMessage({
+-                                    jid: user,
+-                                    type: e2eType,
+-                                    ciphertext: content
+-                                });
++                                try {
++                                    msgBuffer = await repository.decryptMessage({
++                                        jid: user,
++                                        type: e2eType,
++                                        ciphertext: content
++                                    });
++                                }
++                                catch (error) {
++                                    const isGroup = isJidGroup(stanza.attrs.from);
++                                    const pairedPn = isGroup ? stanza.attrs.participant_pn : stanza.attrs.sender_pn;
++                                    const pairedLid = isGroup ? stanza.attrs.participant_lid : stanza.attrs.sender_lid;
++                                    const primaryPairAddress = isJidUser(user) ? pairedPn : isLidUser(user) ? pairedLid : undefined;
++                                    const alternateAddress = isJidUser(user) ? pairedLid : isLidUser(user) ? pairedPn : undefined;
++                                    const normalizedUser = jidNormalizedUser(user);
++                                    if (!isJidUser(pairedPn) || !isLidUser(pairedLid)
++                                        || !primaryPairAddress || !alternateAddress
++                                        || !normalizedUser
++                                        || jidNormalizedUser(primaryPairAddress) !== normalizedUser
++                                        || jidNormalizedUser(alternateAddress) === normalizedUser) {
++                                        throw error;
++                                    }
++                                    try {
++                                        msgBuffer = await repository.decryptMessage({
++                                            jid: alternateAddress,
++                                            type: e2eType,
++                                            ciphertext: content
++                                        });
++                                    }
++                                    catch {
++                                        throw error;
++                                    }
++                                }
+                                 break;
++                            }
+                             case 'plaintext':
+                                 msgBuffer = content;
+                                 break;
