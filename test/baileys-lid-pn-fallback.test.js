@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { proto } from '@whiskeysockets/baileys';
-import { decryptMessageNode } from '../node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js';
+import { decryptMessageNode, hasDistinctNormalizedJids } from '../node_modules/@whiskeysockets/baileys/lib/Utils/decode-wa-message.js';
+import { jidNormalizedUser } from '../node_modules/@whiskeysockets/baileys/lib/WABinary/index.js';
 
 const OWN_PN = '15550000999@s.whatsapp.net';
 const OWN_LID = '999999999@lid';
@@ -152,6 +153,28 @@ test('does not retry when the stanza has no complete paired identity or it does 
       assert.equal(logs.some(entry => entry.level === 'debug'), false);
     });
   }
+});
+
+test('does not retry when the alternate JID normalizes to the primary address', async () => {
+  const primary = '15550000001:7@s.whatsapp.net';
+  const primaryPair = '15550000001@s.whatsapp.net';
+  const alternate = '15550000001:3@s.whatsapp.net';
+  assert.equal(jidNormalizedUser(primary), jidNormalizedUser(alternate));
+  assert.equal(hasDistinctNormalizedJids(primary, alternate), false);
+
+  const firstError = new Error('synthetic primary decrypt failure');
+  const { calls, logs, message } = harness(
+    makeStanza({
+      from: primary,
+      attrs: { sender_pn: primaryPair, sender_lid: alternate },
+    }),
+    async () => { throw firstError; },
+  );
+  await message.decrypt();
+  assert.equal(calls.length, 1);
+  assert.equal(message.fullMessage.messageStubParameters[0], firstError.message);
+  assert.equal(JSON.stringify(logs).includes(primary), false);
+  assert.equal(JSON.stringify(logs).includes(alternate), false);
 });
 
 test('does not try an alternate identity when the primary decrypt succeeds', async () => {
