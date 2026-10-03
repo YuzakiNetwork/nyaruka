@@ -20,6 +20,7 @@ import { config }    from './config.js';
 import { initDatabase } from './lib/database/db.js';
 import { printBanner, printConnected, printReconnecting } from './lib/utils/banner.js';
 import { logger }    from './lib/utils/logger.js';
+import { installLibsignalBadMacLogDeduper } from './lib/utils/libsignal-log-dedupe.js';
 import {
   createCredentialPersister,
   createQueuedKeyStore,
@@ -38,7 +39,11 @@ import {
 import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
 import { closeWhatsAppSocket, trackWhatsAppSocket } from './lib/whatsapp/socket-close.js';
-import { installFatalProcessHandlers } from './lib/whatsapp/process-guards.js';
+import {
+  createShutdownCleanup,
+  installFatalProcessHandlers,
+  installShutdownSignalHandlers,
+} from './lib/whatsapp/process-guards.js';
 import { loadCommands, watchCommands, routeMessage, normalizeMessage, setContactStore, getCommandStats } from './handler/index.js';
 import { loadEconomy, economyTick, checkAndRotateWorldEvent } from './lib/game/economy.js';
 import { startPolling, stopPolling, setWASock as setDonateWASock } from './webhook/trakteer.js';
@@ -127,7 +132,7 @@ async function start() {
 
   // Tampilkan banner launching
   await printBanner({
-    version:       process.env.npm_package_version || '3.1.2',
+    version:       process.env.npm_package_version || '3.1.3',
     botName:       config.bot.name    || 'Nyaruka',
     prefix:        config.bot.prefix  || '!',
     ownerNumber:   process.env.BOT_OWNER_NUMBER || process.env.BOT_OWNER_LID || 'Belum diset',
@@ -385,13 +390,30 @@ function startCronJobs(sock) {
 
 // ── Guards ────────────────────────────────────────────────────────────────────
 
+const disposeLibsignalBadMacLogDeduper = installLibsignalBadMacLogDeduper({ logger });
+const cleanupRuntime = createShutdownCleanup({
+  dispose: disposeLibsignalBadMacLogDeduper,
+  close: () => reconnect.close(),
+});
+
+installShutdownSignalHandlers({
+  processObject: process,
+  logger,
+  cleanup: cleanupRuntime,
+});
+
 installFatalProcessHandlers({
   processObject: process,
   logger,
-  cleanup: () => reconnect.close(),
+  cleanup: cleanupRuntime,
 });
 
-start().catch(err => {
+start().catch(async err => {
   logger.fatal({ err }, 'Fatal startup error');
+  try {
+    await cleanupRuntime();
+  } catch (cleanupError) {
+    logger.error(sanitizeDiagnostic(cleanupError), 'Startup cleanup failed');
+  }
   process.exit(1);
 });
