@@ -24,6 +24,7 @@ function createHarness({ maxBufferedEntries, maxBufferedArgs, maxBufferedStringC
   const logs = [];
   const immediates = [];
   const timers = [];
+  let clearImmediateCalls = 0;
   let clockMs = 5_000;
   const consoleObject = {
     error(...args) {
@@ -46,8 +47,13 @@ function createHarness({ maxBufferedEntries, maxBufferedArgs, maxBufferedStringC
     maxBufferedStringChars,
     nowFn: () => clockMs,
     setImmediateFn(callback) {
-      immediates.push(callback);
-      return callback;
+      const immediate = { callback, cleared: false, fired: false };
+      immediates.push(immediate);
+      return immediate;
+    },
+    clearImmediateFn(immediate) {
+      clearImmediateCalls += 1;
+      immediate.cleared = true;
     },
     setTimeoutFn(callback, delay) {
       const timer = { callback, delay, cleared: false, fired: false, unref() {} };
@@ -64,14 +70,21 @@ function createHarness({ maxBufferedEntries, maxBufferedArgs, maxBufferedStringC
     originalError,
     logs,
     printed,
+    immediates,
     timers,
     logger,
     dispose,
+    get clearImmediateCalls() { return clearImmediateCalls; },
     advanceTime(milliseconds) {
       clockMs += milliseconds;
     },
     flushImmediate() {
-      while (immediates.length > 0) immediates.shift()();
+      while (immediates.length > 0) {
+        const immediate = immediates.shift();
+        if (immediate.cleared || immediate.fired) continue;
+        immediate.fired = true;
+        immediate.callback();
+      }
     },
     fireNextTimer() {
       const timer = timers.find(candidate => !candidate.cleared && !candidate.fired);
@@ -186,6 +199,39 @@ test('fails open and forwards unrelated, partial, misshapen, or changed signatur
   }
 });
 
+test('fails open on a large object argument without inspecting or retaining it', () => {
+  const harness = createHarness();
+  let getterRead = false;
+  const largeObject = { payload: Buffer.alloc(5 * 1024 * 1024) };
+  largeObject.self = largeObject;
+  Object.defineProperty(largeObject, 'tripwire', {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      throw new Error('the deduper must not inspect arbitrary objects');
+    },
+  });
+
+  try {
+    harness.consoleObject.error(FAILURE_HEADER);
+    harness.consoleObject.error(BAD_MAC_SESSION_ERROR, BAD_MAC_STACK);
+    harness.consoleObject.error(largeObject);
+
+    assert.deepEqual(harness.printed[0], [FAILURE_HEADER]);
+    assert.deepEqual(harness.printed[1], [BAD_MAC_SESSION_ERROR, BAD_MAC_STACK]);
+    assert.equal(harness.printed[2].length, 1);
+    assert.strictEqual(harness.printed[2][0], largeObject);
+    assert.equal(getterRead, false);
+    assert.deepEqual(harness.logs, []);
+    assert.equal(harness.clearImmediateCalls, 1);
+
+    harness.flushImmediate();
+    assert.equal(harness.printed.length, 3, 'the cancelled callback must not replay the batch twice');
+  } finally {
+    harness.dispose();
+  }
+});
+
 test('forwards the full candidate batch when entry, argument, or stack-text caps are exceeded', () => {
   const entryHarness = createHarness({ maxBufferedEntries: 3 });
   try {
@@ -264,6 +310,39 @@ test('flushes the final count and elapsed window exactly once on normal signal s
     assert.deepEqual(harness.printed, [['normal shutdown passthrough']]);
   } finally {
     shutdownHandlers.dispose();
+    harness.dispose();
+  }
+});
+
+test('dispose clears a pending immediate, forwards an incomplete candidate once, and flushes one final summary', () => {
+  const harness = createHarness();
+  try {
+    emitBadMacBurst(harness.consoleObject);
+    harness.flushImmediate();
+    harness.advanceTime(4_200);
+
+    harness.consoleObject.error(FAILURE_HEADER);
+    assert.equal(harness.immediates.length, 1);
+    assert.equal(harness.immediates[0].cleared, false);
+    const lateCallback = harness.immediates[0].callback;
+
+    harness.dispose();
+    assert.equal(harness.immediates[0].cleared, true);
+    assert.equal(harness.clearImmediateCalls, 1);
+    assert.deepEqual(harness.printed, [[FAILURE_HEADER]]);
+    assert.deepEqual(harness.logs.filter(entry => entry.level === 'warn'), [{
+      level: 'warn',
+      details: { count: 1, elapsedMs: 4_200 },
+      message: SUMMARY_MESSAGE,
+    }]);
+    assert.equal(harness.timers[0].cleared, true);
+
+    lateCallback();
+    harness.flushImmediate();
+    harness.dispose();
+    assert.deepEqual(harness.printed, [[FAILURE_HEADER]], 'late callbacks must not replay disposed entries');
+    assert.equal(harness.logs.filter(entry => entry.level === 'warn').length, 1);
+  } finally {
     harness.dispose();
   }
 });
