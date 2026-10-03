@@ -88,7 +88,7 @@ const EVENTS = [
     id: 'rare_material', weight: 5,
     emoji: '⛏️', title: 'Bahan Langka!',
     fn: async (player) => {
-      const mats = ['ancient_rune', 'monster_core', 'dragon_scale_mat', 'void_crystal'];
+      const mats = ['ancient_rune', 'monster_core', 'dragon_scale_mat','wolf_fang', 'void_crystal'];
       // Pilih berdasarkan level
       const pool = player.level >= 40 ? mats : player.level >= 20 ? mats.slice(0, 3) : mats.slice(0, 2);
       const item = pick(pool);
