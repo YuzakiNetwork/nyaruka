@@ -39,7 +39,11 @@ import {
 import { writePairingCodeToTerminal } from './lib/whatsapp/pairing-output.js';
 import { logReconnectDiagnostic } from './lib/whatsapp/reconnect-logging.js';
 import { closeWhatsAppSocket, trackWhatsAppSocket } from './lib/whatsapp/socket-close.js';
-import { installFatalProcessHandlers } from './lib/whatsapp/process-guards.js';
+import {
+  createShutdownCleanup,
+  installFatalProcessHandlers,
+  installShutdownSignalHandlers,
+} from './lib/whatsapp/process-guards.js';
 import { loadCommands, watchCommands, routeMessage, normalizeMessage, setContactStore, getCommandStats } from './handler/index.js';
 import { loadEconomy, economyTick, checkAndRotateWorldEvent } from './lib/game/economy.js';
 import { startPolling, stopPolling, setWASock as setDonateWASock } from './webhook/trakteer.js';
@@ -386,15 +390,30 @@ function startCronJobs(sock) {
 
 // ── Guards ────────────────────────────────────────────────────────────────────
 
-installLibsignalBadMacLogDeduper({ logger });
+const disposeLibsignalBadMacLogDeduper = installLibsignalBadMacLogDeduper({ logger });
+const cleanupRuntime = createShutdownCleanup({
+  dispose: disposeLibsignalBadMacLogDeduper,
+  close: () => reconnect.close(),
+});
+
+installShutdownSignalHandlers({
+  processObject: process,
+  logger,
+  cleanup: cleanupRuntime,
+});
 
 installFatalProcessHandlers({
   processObject: process,
   logger,
-  cleanup: () => reconnect.close(),
+  cleanup: cleanupRuntime,
 });
 
-start().catch(err => {
+start().catch(async err => {
   logger.fatal({ err }, 'Fatal startup error');
+  try {
+    await cleanupRuntime();
+  } catch (cleanupError) {
+    logger.error(sanitizeDiagnostic(cleanupError), 'Startup cleanup failed');
+  }
   process.exit(1);
 });
