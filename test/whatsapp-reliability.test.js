@@ -202,7 +202,7 @@ test('408 and 503 remain on the existing transient retry path', async () => {
   assert.equal(diagnostics.some(({ event }) => event === 'reconnect_stopped'), false);
 });
 
-test('a recovered open resets the badSession retry budget', async () => {
+test('only successful markOpen resets the badSession retry budget', async () => {
   const timers = makeFakeTimers();
   const diagnostics = [];
   let connectCalls = 0;
@@ -230,6 +230,78 @@ test('a recovered open resets the badSession retry budget', async () => {
   assert.deepEqual(retries.map(({ badSessionAttempt }) => badSessionAttempt), [1, 2, 1]);
   assert.deepEqual(retries.map(({ attempt }) => attempt), [1, 2, 1]);
   assert.equal(diagnostics.some(({ event }) => event === 'reconnect_stopped'), false);
+});
+
+test('401 logout and pairing do not reset the badSession budget before open', async () => {
+  const { sessionDirectory, credsPath } = makeSessionDirectory();
+  const originalContents = fs.readFileSync(credsPath, 'utf8');
+  const timers = makeFakeTimers();
+  const diagnostics = [];
+  let connectCalls = 0;
+  let quarantineCalls = 0;
+  let pairingRequired = 0;
+  let quarantinePath;
+  const controller = createReconnectController({
+    connect: async () => ({ id: `socket-mixed-${++connectCalls}` }),
+    closeSocket: async () => {},
+    quarantine: async () => {
+      quarantineCalls += 1;
+      quarantinePath = quarantineSession(sessionDirectory, { now: () => 5678 });
+      return quarantinePath;
+    },
+    onPairingRequired: () => { pairingRequired += 1; },
+    onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    random: () => 0,
+  });
+
+  await controller.connect();
+  let socket = controller.getSocket();
+  async function failWithBadSession(expectedAttempt) {
+    await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+    const badSessionRetries = diagnostics
+      .filter(({ event, details }) => event === 'retry_scheduled' && details.reason === 'bad_session')
+      .map(({ details }) => details);
+    assert.equal(badSessionRetries.at(-1).badSessionAttempt, expectedAttempt);
+    await timers.fireNext();
+    socket = controller.getSocket();
+  }
+
+  await failWithBadSession(1);
+  assert.equal(classifyDisconnect(baileysFailure401()), 'logout');
+  await controller.handleDisconnect(socket, baileysFailure401());
+  assert.equal(quarantineCalls, 1);
+  assert.equal(pairingRequired, 1);
+  assert.equal(fs.readFileSync(path.join(quarantinePath, 'creds.json'), 'utf8'), originalContents);
+  assert.equal(diagnostics.filter(({ event }) => event === 'logout_confirmed').length, 1);
+  assert.equal(diagnostics.filter(({ event, details }) => event === 'retry_scheduled' && details.reason === 'pairing').length, 1);
+
+  await timers.fireNext();
+  socket = controller.getSocket();
+  await failWithBadSession(2);
+  await failWithBadSession(3);
+  await controller.handleDisconnect(socket, { output: { statusCode: 500 } });
+
+  const badSessionRetries = diagnostics
+    .filter(({ event, details }) => event === 'retry_scheduled' && details.reason === 'bad_session')
+    .map(({ details }) => details);
+  const stopped = diagnostics.find(({ event }) => event === 'reconnect_stopped');
+  assert.deepEqual(badSessionRetries.map(({ badSessionAttempt }) => badSessionAttempt), [1, 2, 3]);
+  assert.deepEqual(badSessionRetries.map(({ delayMs }) => delayMs), [500, 1_000, 2_000]);
+  assert.deepEqual(stopped.details, {
+    errorType: 'Error',
+    statusCode: 500,
+    reason: 'bad_session_retry_limit',
+    retryLimit: 3,
+  });
+  assert.equal(connectCalls, 5);
+  assert.equal(quarantineCalls, 1);
+  assert.equal(pairingRequired, 1);
+  assert.equal(fs.existsSync(sessionDirectory), true);
+  assert.deepEqual(fs.readdirSync(sessionDirectory), []);
+  assert.equal(fs.readFileSync(path.join(quarantinePath, 'creds.json'), 'utf8'), originalContents);
+  assert.equal(timers.timers.filter((timer) => !timer.cleared && !timer.fired).length, 0);
 });
 
 test('persistent 500 badSession stops after three retries without deleting auth or requesting pairing', async () => {
