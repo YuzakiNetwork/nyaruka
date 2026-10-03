@@ -107,5 +107,5 @@ let handler = async (m, { args }) => {
 handler.help     = ['battle [skill]'];
 handler.tags     = ['rpg'];
 handler.command  = /^(battle|fight|atk)$/i;
-handler.cooldown = 30;
+handler.cooldown = 300;
 export default handler;
