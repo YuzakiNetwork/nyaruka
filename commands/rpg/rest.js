@@ -13,7 +13,7 @@ import { getPlayer, savePlayer } from '../../lib/game/player.js';
 import { weightedPick, randInt, pick } from '../../lib/utils/random.js';
 
 // ── Konfigurasi ───────────────────────────────────────────────────────────────
-const COST_BASE      = 150;   // biaya dasar
+const COST_BASE      = 20;   // biaya dasar
 const COST_PER_LEVEL = 25;    // tambahan biaya per level
 // Contoh biaya: Lv1 = 175g | Lv10 = 400g | Lv30 = 900g | Lv50 = 1.400g
 
