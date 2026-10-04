@@ -14,7 +14,7 @@ import { weightedPick, randInt, pick } from '../../lib/utils/random.js';
 
 // ── Konfigurasi ───────────────────────────────────────────────────────────────
 const COST_BASE      = 20;   // biaya dasar
-const COST_PER_LEVEL = 25;    // tambahan biaya per level
+const COST_PER_LEVEL = 20;    // tambahan biaya per level
 // Contoh biaya: Lv1 = 175g | Lv10 = 400g | Lv30 = 900g | Lv50 = 1.400g
 
 // Peluang tiap hasil (bobot, total bebas)
