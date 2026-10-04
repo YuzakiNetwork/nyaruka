@@ -5,9 +5,13 @@
  * Pemakaian:
  *   !level            — lihat profil sendiri
  *   !level @user      — lihat profil player lain
+ *
+ * Catatan: statistik PvP (W/L) dibaca dari player.stats yang dicatat oleh duel.js
+ * (pvpWins, pvpLosses, wins, losses).
  */
 
 import { getPlayer, expRequired, calcRank } from '../../lib/game/player.js';
+import { normalizeJid }                     from '../../handler/index.js';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 function bar(current, max, size = 10) {
@@ -30,8 +34,9 @@ const RANK_STEPS = [
 const AWAKEN_LEVELS = [30, 60, 90];
 
 let handler = async (m, { args }) => {
-  // Target: player yang di-mention, atau diri sendiri
-  const targetId = m.mentionedJid?.[0] || m.sender;
+  // Target: player yang di-mention (contextInfo), atau diri sendiri
+  const mentionedJids = m.raw?.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  const targetId = mentionedJids[0] ? normalizeJid(mentionedJids[0]) : m.sender;
   const isSelf   = targetId === m.sender;
   const player   = getPlayer(targetId);
 
@@ -66,9 +71,11 @@ let handler = async (m, { args }) => {
     awakenLine = `⚡ Awakening: ${current}\n   Berikutnya: Awakening ${'I'.repeat(awTier + 1)}${ready}`;
   }
 
-  // ── Win rate ────────────────────────────────────────────────────────────────
-  const pvpTotal = (s.pvpWins || 0) + (s.pvpLosses || 0);
-  const pvpRate  = pvpTotal > 0 ? Math.round(((s.pvpWins || 0) / pvpTotal) * 100) : 0;
+  // ── PvP (dicatat oleh duel.js) ──────────────────────────────────────────────
+  const pvpWins   = s.pvpWins   || 0;
+  const pvpLosses = s.pvpLosses || 0;
+  const pvpTotal  = pvpWins + pvpLosses;
+  const pvpRate   = pvpTotal > 0 ? Math.round((pvpWins / pvpTotal) * 100) : 0;
 
   const title = player.activeTitle ? `『${player.activeTitle}』 ` : '';
   const job   = player.job && player.job !== player.class
@@ -107,15 +114,20 @@ let handler = async (m, { args }) => {
     `🏰 Dungeon clear   : ${fmt(s.dungeonsCleared)}`,
     `💀 Boss dibunuh    : ${fmt((s.bossesKilled || []).length)}`,
     `🌍 World boss      : ${fmt(s.worldBossKills)}`,
-    `⚔️ PvP             : ${fmt(s.pvpWins)}W / ${fmt(s.pvpLosses)}L (${pvpRate}%)`,
     `💥 Total damage    : ${fmt(s.totalDmgDealt)}`,
     `🔨 Crafting        : ${fmt(s.craftCount)}`,
     `📜 Quest selesai   : ${fmt((player.completedQuests || []).length)}`,
     `🎖️ Title dimiliki  : ${fmt((player.earnedTitles || []).length)}`,
+    ``,
+    `⚔️ *PVP / DUEL*`,
+    `🥇 Menang  : ${fmt(pvpWins)}`,
+    `💔 Kalah   : ${fmt(pvpLosses)}`,
+    `📊 Total   : ${fmt(pvpTotal)} duel`,
+    `   Win rate: ${pvpRate}% [${bar(pvpWins, pvpTotal)}]`,
   ];
 
   if (player.guildId) {
-    lines.push(`🛡️ Guild : ${player.guildId}${player.guildRole ? ` (${player.guildRole})` : ''}`);
+    lines.push(``, `🛡️ Guild : ${player.guildId}${player.guildRole ? ` (${player.guildRole})` : ''}`);
   }
 
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
