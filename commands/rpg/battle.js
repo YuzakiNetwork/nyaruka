@@ -1,6 +1,6 @@
 /**
  * commands/rpg/battle.js
- * PvE Battle + Pet Capture + Stats Tracking + Title Check
+ * PvE Battle + Pet Capture + Stats Tracking + Title Check + Quest Tracking
  */
 
 import { getPlayer, savePlayer }             from '../../lib/game/player.js';
@@ -9,6 +9,7 @@ import { executeBattle, applyRewards }       from '../../lib/game/battleEngine.j
 import { getPet, tryCapture, createPet, awardPetExp } from '../../lib/game/pet.js';
 import { ZONES }                                        from './zone.js';
 import { checkTitles }                        from '../../lib/game/title.js';
+import { trackQuest }                         from '../../lib/game/quest.js';
 
 let handler = async (m, { args }) => {
   const player = getPlayer(m.sender);
@@ -31,7 +32,6 @@ let handler = async (m, { args }) => {
 
   const result = await executeBattle(player, monster, { skillId });
 
-  // Apply rewards
   // Apply zone multiplier ke rewards
   if (result.playerWon && zone) {
     result.rewards.gold = Math.floor((result.rewards.gold || 0) * (zone.goldMult || 1));
@@ -45,6 +45,10 @@ let handler = async (m, { args }) => {
   player.hp   = result.finalHp;
   player.mana = result.finalMana;
 
+  // Flag elite/boss (monster.js memakai 'elite' dan 'isElite', 'boss' dan 'isBoss')
+  const isElite = !!(monster.elite || monster.isElite);
+  const isBoss  = !!(monster.boss  || monster.isBoss);
+
   // Update stats tracking
   if (!player.stats) player.stats = {};
   if (result.playerWon) {
@@ -52,8 +56,8 @@ let handler = async (m, { args }) => {
     player.stats.wins           = (player.stats.wins || 0) + 1;
     player.stats.totalDmgDealt  = (player.stats.totalDmgDealt || 0) + (result.totalDmg || 0);
 
-    // Track boss kills
-    if (monster.isBoss || monster.isElite) {
+    // Track boss/elite kills
+    if (isBoss || isElite) {
       if (!player.stats.bossesKilled) player.stats.bossesKilled = [];
       if (!player.stats.bossesKilled.includes(monster.id)) {
         player.stats.bossesKilled.push(monster.id);
@@ -72,7 +76,6 @@ let handler = async (m, { args }) => {
       await createPet(m.sender, captured.id);
       captureMsg = `\n\n🎉 *PET TERTANGKAP!*\n${captured.name} bergabung bersamamu!\nGunakan *!pet* untuk lihat statusnya.`;
     } else if (Math.random() < 0.05) {
-      // 5% chance dapat egg hint
       captureMsg = `\n\n🥚 _Kamu melihat telur kecil di dekat monster... (${(Math.random() < 0.3 ? 'Tapi sudah pecah' : 'Tapi tidak bisa diambil')}.)_`;
     }
   }
@@ -88,6 +91,27 @@ let handler = async (m, { args }) => {
   const newTitles = checkTitles(player);
   await savePlayer(player);
 
+  // ── Quest tracking (objek player yang sama, setelah savePlayer) ──
+  // trackQuest menyimpan sendiri kalau ada progress.
+  let questMsg = '';
+  if (result.playerWon) {
+    const qMsgs = [];
+
+    const kill = await trackQuest(player, monster.id, 1, { isElite });
+    if (kill) qMsgs.push(kill.message);
+
+    // Quest collect (Wolf Fang, dll.)
+    // Asumsi: loot ada di result.rewards.items / loot / drops dengan format { itemId, qty }.
+    // Sesuaikan kalau battleEngine.js memakai nama lain.
+    const drops = result.rewards.items || result.rewards.loot || result.rewards.drops || [];
+    for (const it of drops) {
+      const col = await trackQuest(player, it.itemId, it.qty || 1);
+      if (col) qMsgs.push(col.message);
+    }
+
+    if (qMsgs.length) questMsg = '\n\n' + qMsgs.join('\n\n');
+  }
+
   const logText    = result.log.slice(-12).join('\n');
   const rewardText = result.playerWon
     ? `💰 +${result.rewards.gold}g | ⭐ +${result.rewards.exp} EXP`
@@ -100,6 +124,7 @@ let handler = async (m, { args }) => {
     (newTitles.length ? `\n🏆 *Title baru:* ${newTitles.map(t => t.name).join(', ')}` : '') +
     petMsg +
     captureMsg +
+    questMsg +
     `\n\n❤️ HP: *${player.hp}/${player.maxHp}*`
   );
 };
