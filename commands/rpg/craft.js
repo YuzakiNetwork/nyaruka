@@ -2,6 +2,9 @@
  * commands/rpg/craft.js
  * Crafting system — gabungkan material jadi item lebih baik.
  * Usage: !craft | !craft <recipe_id>
+ *
+ * Mencatat player.stats.craftCount saat crafting BERHASIL
+ * (dibaca oleh level.js dan sistem title).
  */
 
 import { getPlayer, savePlayer, hasItem, removeItem, addItem } from '../../lib/game/player.js';
@@ -80,7 +83,7 @@ let handler = async (m, { args }) => {
   const player = getPlayer(m.sender);
   if (!player) return m.reply(`❌ Daftar dulu: *!register <nama> <class>*`);
 
-  const recipeId = args[0];
+  const recipeId = args[0]?.toLowerCase();
 
   // ── List semua recipe ──────────────────────────────────────────────────────
   if (!recipeId) {
@@ -135,6 +138,11 @@ let handler = async (m, { args }) => {
   const success = chance(recipe.successChance);
   if (success) {
     addItem(player, recipe.result, recipe.resultQty);
+
+    // Catat statistik untuk level.js / title system
+    player.stats = player.stats || {};
+    player.stats.craftCount = (player.stats.craftCount || 0) + 1;
+
     await savePlayer(player);
     const result = getItem(recipe.result);
     const emoji  = result ? RARITY_EMOJI[result.rarity] : '🔹';
