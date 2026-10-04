@@ -13,9 +13,10 @@ import { getPlayer, savePlayer } from '../../lib/game/player.js';
 import { weightedPick, randInt, pick } from '../../lib/utils/random.js';
 
 // ── Konfigurasi ───────────────────────────────────────────────────────────────
-const COST_BASE      = 20;   // biaya dasar
-const COST_PER_LEVEL = 20;    // tambahan biaya per level
-// Contoh biaya: Lv1 = 175g | Lv10 = 400g | Lv30 = 900g | Lv50 = 1.400g
+const COST_BASE      = 20;     // biaya dasar
+const COST_PER_LEVEL = 10;     // tambahan biaya per level
+const COST_MAX       = 1000;   // batas maksimum biaya
+// Contoh biaya: Lv1 = 30g | Lv10 = 120g | Lv30 = 320g | Lv50 = 520g | Lv98+ = 1.000g (maks)
 
 // Peluang tiap hasil (bobot, total bebas)
 const OUTCOME_WEIGHTS = [
@@ -46,7 +47,7 @@ const FULL_FLAVOR = [
   'Mimpi indah semalaman. Kamu bangun dengan tenaga penuh!',
 ];
 
-const calcCost = (level) => COST_BASE + COST_PER_LEVEL * (level || 1);
+const calcCost = (level) => Math.min(COST_MAX, COST_BASE + COST_PER_LEVEL * (level || 1));
 const fmt = (n) => Number(n || 0).toLocaleString('id-ID');
 const rand = ([min, max]) => min + Math.random() * (max - min);
 
