@@ -10,7 +10,12 @@ import { getPlayer, savePlayer, addItem, awardExp } from '../../lib/game/player.
 import { weightedPick, randInt, chance, pick }      from '../../lib/utils/random.js';
 import { getWorldEvent }                            from '../../lib/game/economy.js';
 import { randomMonster, rollMonsterLoot, rollGold } from '../../lib/game/monster.js';
-import { ITEMS, RARITY_EMOJI }                      from '../../lib/game/item.js';
+import { ITEMS, RARITY_EMOJI, formatItem }          from '../../lib/game/item.js';
+import { trackQuest }                               from '../../lib/game/quest.js';
+
+// Setiap event boleh mengembalikan:
+//   { msgs: [...], track: [{ id, count, isElite? }] }
+// `track` dipakai handler untuk memanggil trackQuest setelah player disimpan.
 
 const EVENTS = [
   // ── Lucky events ──
@@ -40,7 +45,10 @@ const EVENTS = [
       const itemId = pick(items);
       const qty    = randInt(1, 3);
       addItem(player, itemId, qty);
-      return { msgs: [`Pedagang kelana memberimu hadiah!\n🎒 *${itemId}* ×${qty}`] };
+      return {
+        msgs:  [`Pedagang kelana memberimu hadiah!\n🎒 ${formatItem(itemId, qty)}`],
+        track: [{ id: itemId, count: qty }],
+      };
     },
   },
   {
@@ -56,19 +64,28 @@ const EVENTS = [
     id: 'monster_ambush', weight: 10,
     emoji: '👹', title: 'Diserang Monster!',
     fn: async (player) => {
-      const monster = randomMonster(player.level, 0);
+      const monster = randomMonster(player.level, 0.1);
       const loot    = rollMonsterLoot(monster, 0);
       const gold    = rollGold(monster);
       const exp     = monster.expReward;
+      const isElite = !!(monster.elite || monster.isElite);
+
       player.gold += gold;
       for (const l of loot) addItem(player, l.itemId, l.qty);
+      if (!player.stats) player.stats = {};
+      player.stats.monstersKilled = (player.stats.monstersKilled || 0) + 1;
+
       const lvl = await awardExp(player, exp);
-      const lootText = loot.length ? loot.map(l => `${l.itemId}×${l.qty}`).join(', ') : 'tidak ada';
+      const lootText = loot.length ? loot.map(l => formatItem(l.itemId, l.qty)).join(', ') : 'tidak ada';
       return {
         msgs: [
           `*${monster.name}* ${monster.emoji} menyerang! Kamu berhasil mengalahkannya!`,
           `💰 +${gold}g | ⭐ +${exp} EXP\n🎒 Loot: ${lootText}`,
           ...lvl.messages,
+        ],
+        track: [
+          { id: monster.id, count: 1, isElite },
+          ...loot.map(l => ({ id: l.itemId, count: l.qty })),
         ],
       };
     },
@@ -94,9 +111,10 @@ const EVENTS = [
       const item = pick(pool);
       const qty  = randInt(1, 2);
       addItem(player, item, qty);
-      const itm = ITEMS[item];
-      const emoji = RARITY_EMOJI[itm?.rarity] || '🔹';
-      return { msgs: [`Kamu menemukan bahan langka saat menggali!\n${emoji} *${item}* ×${qty}`] };
+      return {
+        msgs:  [`Kamu menemukan bahan langka saat menggali!\n${formatItem(item, qty)}`],
+        track: [{ id: item, count: qty }],
+      };
     },
   },
   {
@@ -184,8 +202,14 @@ let handler = async (m) => {
   }));
 
   const event = weightedPick(events.map(e => ({ value: e, weight: e.weight })));
-  const { msgs } = await event.fn(player);
+  const { msgs, track = [] } = await event.fn(player);
   await savePlayer(player);
+
+  // ── Quest tracking (objek player yang sama, setelah savePlayer) ──
+  for (const t of track) {
+    const q = await trackQuest(player, t.id, t.count, { isElite: !!t.isElite });
+    if (q) msgs.push('\n' + q.message);
+  }
 
   const worldNote = world.id !== 'none'
     ? `\n${world.emoji} *${world.name}* mempengaruhi petualanganmu!`
