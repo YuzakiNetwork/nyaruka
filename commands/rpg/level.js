@@ -6,12 +6,16 @@
  *   !level            — lihat profil sendiri
  *   !level @user      — lihat profil player lain
  *
- * Catatan: statistik PvP (W/L) dibaca dari player.stats yang dicatat oleh duel.js
- * (pvpWins, pvpLosses, wins, losses).
+ * Catatan:
+ * - Statistik PvP (W/L) dibaca dari player.stats yang dicatat oleh duel.js
+ *   (pvpWins, pvpLosses, wins, losses).
+ * - Statistik crafting: player.stats.craftCount (dicatat oleh craft.js saat
+ *   crafting berhasil) + jumlah resep yang bahannya cukup (dihitung dari RECIPES).
  */
 
-import { getPlayer, expRequired, calcRank } from '../../lib/game/player.js';
-import { normalizeJid }                     from '../../handler/index.js';
+import { getPlayer, hasItem, expRequired, calcRank } from '../../lib/game/player.js';
+import { normalizeJid }                              from '../../handler/index.js';
+import { RECIPES }                                   from './craft.js';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 function bar(current, max, size = 10) {
@@ -77,6 +81,25 @@ let handler = async (m, { args }) => {
   const pvpTotal  = pvpWins + pvpLosses;
   const pvpRate   = pvpTotal > 0 ? Math.round((pvpWins / pvpTotal) * 100) : 0;
 
+  // ── Crafting (data dari craft.js) ───────────────────────────────────────────
+  const recipes     = Object.values(RECIPES);
+  const readyRecipe = recipes.filter(r =>
+    r.materials.every(mat => hasItem(player, mat.itemId, mat.qty))
+  );
+
+  const craftLines = [
+    `🔨 *CRAFTING*`,
+    `⚒️ Berhasil craft : ${fmt(s.craftCount)}`,
+    `📖 Resep siap     : ${readyRecipe.length} / ${recipes.length}`,
+  ];
+
+  // Detail resep siap hanya ditampilkan di profil sendiri (isi inventory pemain lain tidak dibuka)
+  if (isSelf && readyRecipe.length) {
+    const shown = readyRecipe.slice(0, 3).map(r => r.name).join(', ');
+    const extra = readyRecipe.length > 3 ? ` +${readyRecipe.length - 3} lagi` : '';
+    craftLines.push(`   ${shown}${extra}`, `   _ketik !craft untuk membuat_`);
+  }
+
   const title = player.activeTitle ? `『${player.activeTitle}』 ` : '';
   const job   = player.job && player.job !== player.class
     ? `${player.class} → ${player.job}`
@@ -115,9 +138,10 @@ let handler = async (m, { args }) => {
     `💀 Boss dibunuh    : ${fmt((s.bossesKilled || []).length)}`,
     `🌍 World boss      : ${fmt(s.worldBossKills)}`,
     `💥 Total damage    : ${fmt(s.totalDmgDealt)}`,
-    `🔨 Crafting        : ${fmt(s.craftCount)}`,
     `📜 Quest selesai   : ${fmt((player.completedQuests || []).length)}`,
     `🎖️ Title dimiliki  : ${fmt((player.earnedTitles || []).length)}`,
+    ``,
+    ...craftLines,
     ``,
     `⚔️ *PVP / DUEL*`,
     `🥇 Menang  : ${fmt(pvpWins)}`,
