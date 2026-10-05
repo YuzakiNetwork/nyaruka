@@ -5,7 +5,7 @@
  */
 
 import { getPlayer, savePlayer, hasItem } from '../../lib/game/player.js';
-import { getItem, generateItemSerialMap, getItemBySerial, RARITY_EMOJI } from '../../lib/game/item.js';
+import { getItem, generateItemSerialMap, getItemBySerial, getItemSerial, RARITY_EMOJI } from '../../lib/game/item.js';
 
 const SLOT_MAP = {
   weapon: 'weapon',
@@ -25,22 +25,15 @@ let handler = async (m, { args }) => {
   if (!player) return m.reply(`❌ Register first: *!register <n> <class>*`);
 
   const serialMap = generateItemSerialMap();
-  const equippableInInventory = (player.inventory || [])
-    .filter(slot => SLOT_MAP[getItem(slot.itemId)?.type])
-    .map(slot => {
-      let serial = null;
-      for (const [code, itemId] of Object.entries(serialMap)) {
-        if (itemId === slot.itemId) {
-          serial = code;
-          break;
-        }
-      }
-      return { ...slot, serial };
-    })
-    .filter(slot => slot.serial);
 
   // ── SHOW EQUIPPABLE ITEMS ──────────────────────────────────────────────
   if (!args.length) {
+    const equippableInInventory = (player.inventory || [])
+      .filter(slot => {
+        const item = getItem(slot.itemId);
+        return item && SLOT_MAP[item.type];
+      });
+
     if (!equippableInInventory.length) {
       return m.reply(
         `🧰 You don't own any equippable item yet.\n` +
@@ -50,11 +43,12 @@ let handler = async (m, { args }) => {
 
     const lines = equippableInInventory.map(slot => {
       const item = getItem(slot.itemId);
+      const serial = getItemSerial(slot.itemId);
       const slotType = SLOT_MAP[item.type];
       const isEquipped = player.equipment[slotType] === item.id ? ' ✅' : '';
       const emoji = RARITY_EMOJI[item.rarity] || '⬜';
       const stats = formatItemStats(item);
-      return `  ${slot.serial} | ${emoji} *${item.name}* [${item.rarity}]${isEquipped}\n      └─ ${stats}`;
+      return `  ${serial} | ${emoji} *${item.name}* [${item.rarity}]${isEquipped}\n      └─ ${stats}`;
     });
 
     return m.reply(
