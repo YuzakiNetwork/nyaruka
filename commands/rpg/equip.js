@@ -1,11 +1,11 @@
 /**
  * commands/rpg/equip.js
- * Equip or unequip items using serial code.
+ * Equip or unequip items using global serial code.
  * Usage: !equip | !equip A00
  */
 
 import { getPlayer, savePlayer, hasItem } from '../../lib/game/player.js';
-import { getItem } from '../../lib/game/item.js';
+import { getItem, generateItemSerialMap, getItemBySerial, RARITY_EMOJI } from '../../lib/game/item.js';
 
 const SLOT_MAP = {
   weapon: 'weapon',
@@ -13,26 +13,6 @@ const SLOT_MAP = {
   helmet: 'helmet',
   accessory: 'accessory',
 };
-
-function makeSerial(index) {
-  return `A${String(index).padStart(2, '0')}`;
-}
-
-function getEquippableSerialMap(player) {
-  const map = {};
-  let index = 0;
-
-  for (const slot of player.inventory || []) {
-    const item = getItem(slot.itemId);
-    if (!item || !SLOT_MAP[item.type]) continue;
-
-    const serial = makeSerial(index);
-    map[serial] = { itemId: item.id, qty: slot.qty };
-    index += 1;
-  }
-
-  return map;
-}
 
 function formatItemStats(item) {
   const entries = Object.entries(item.stats || {});
@@ -44,26 +24,37 @@ let handler = async (m, { args }) => {
   const player = getPlayer(m.sender);
   if (!player) return m.reply(`❌ Register first: *!register <n> <class>*`);
 
-  const serialMap = getEquippableSerialMap(player);
-  const serialKeys = Object.keys(serialMap);
+  const serialMap = generateItemSerialMap();
+  const equippableInInventory = (player.inventory || [])
+    .filter(slot => SLOT_MAP[getItem(slot.itemId)?.type])
+    .map(slot => {
+      let serial = null;
+      for (const [code, itemId] of Object.entries(serialMap)) {
+        if (itemId === slot.itemId) {
+          serial = code;
+          break;
+        }
+      }
+      return { ...slot, serial };
+    })
+    .filter(slot => slot.serial);
 
   // ── SHOW EQUIPPABLE ITEMS ──────────────────────────────────────────────
   if (!args.length) {
-    if (!serialKeys.length) {
+    if (!equippableInInventory.length) {
       return m.reply(
         `🧰 You don't own any equippable item yet.\n` +
         `Fight monsters or visit *!shop* to get gear.`
       );
     }
 
-    const lines = serialKeys.map((serial) => {
-      const { itemId } = serialMap[serial];
-      const item = getItem(itemId);
-      const slot = SLOT_MAP[item.type];
-      const equipped = player.equipment[slot] === itemId ? ' *(equipped)*' : '';
-      const rarity = item.rarity || 'Unknown';
+    const lines = equippableInInventory.map(slot => {
+      const item = getItem(slot.itemId);
+      const slotType = SLOT_MAP[item.type];
+      const isEquipped = player.equipment[slotType] === item.id ? ' ✅' : '';
+      const emoji = RARITY_EMOJI[item.rarity] || '⬜';
       const stats = formatItemStats(item);
-      return `  ${serial} | *${item.name}* [${rarity}]${equipped}\n      └─ ${item.type.toUpperCase()} | ${stats}`;
+      return `  ${slot.serial} | ${emoji} *${item.name}* [${item.rarity}]${isEquipped}\n      └─ ${stats}`;
     });
 
     return m.reply(
@@ -74,24 +65,15 @@ let handler = async (m, { args }) => {
   }
 
   // ── EQUIP ITEM ─────────────────────────────────────────────────────────
-  const rawInput = args[0].trim();
-  let itemId = rawInput;
+  const serialInput = args[0].trim().toUpperCase();
+  const itemId = getItemBySerial(serialInput);
 
-  // Check if input is a serial code (A00, A01, etc)
-  if (/^[A-Za-z]\d{2,}$/i.test(rawInput)) {
-    const match = Object.entries(serialMap).find(
-      ([serial]) => serial.toLowerCase() === rawInput.toLowerCase()
-    );
-
-    if (!match) {
-      return m.reply(`❌ Unknown item code: *${rawInput}*`);
-    }
-
-    itemId = match[1].itemId;
+  if (!itemId) {
+    return m.reply(`❌ Unknown item code: *${serialInput}*`);
   }
 
   const item = getItem(itemId);
-  if (!item) return m.reply(`❌ Unknown item: *${rawInput}*`);
+  if (!item) return m.reply(`❌ Item not found for code: *${serialInput}*`);
 
   if (!SLOT_MAP[item.type]) {
     return m.reply(`❌ *${item.name}* cannot be equipped (type: ${item.type}).`);
@@ -116,7 +98,7 @@ let handler = async (m, { args }) => {
   await savePlayer(player);
 
   const stats = formatItemStats(item);
-  let response = `✅ Equipped *${item.name}*!\n`;
+  let response = `✅ Equipped *${item.name}* (${serialInput})!\n`;
   response += `Slot: *${slot}*\n`;
   response += `Stats: ${stats}`;
 
