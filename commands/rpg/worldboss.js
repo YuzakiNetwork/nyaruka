@@ -1,6 +1,11 @@
 /**
  * commands/rpg/worldboss.js
  * World Boss — Boss raksasa yang diserang semua player bareng
+ *
+ * Cooldown:
+ *   - Semua command (!boss, !boss rank, dll): 5 detik (handler.cooldown)
+ *   - Serang boss (!boss attack): 5 menit per player, dicek di
+ *     lib/game/worldboss.js → attackWorldBoss()
  */
 
 import { getPlayer, savePlayer, getAllPlayers } from '../../lib/game/player.js';
@@ -10,6 +15,30 @@ import {
 } from '../../lib/game/worldboss.js';
 import { checkTitles } from '../../lib/game/title.js';
 
+// ── Panel owner: daftar boss yang bisa di-summon ──────────────────────────────
+function renderOwnerPanel(state) {
+  const active = state && !state.defeated && Date.now() < state.expiresAt;
+
+  const list = Object.values(WORLD_BOSSES).map((b, i) => {
+    const hours = Math.round((b.spawnDuration || 0) / 3600000);
+    return (
+      `${i + 1}. ${b.emoji} *${b.name}*\n` +
+      `   ID: \`${b.id}\`\n` +
+      `   ❤️ ${b.baseHp.toLocaleString()} | ⚔️ ${b.attack} | 🛡️ ${b.defense} | ⏳ ${hours}j\n` +
+      `   ➜ *!boss spawn ${b.id}*${active ? ' force' : ''}`
+    );
+  }).join('\n\n');
+
+  return (
+    `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `👑 *PANEL OWNER — Summon Boss*\n\n` +
+    list +
+    (active
+      ? `\n\n⚠️ Boss *${state.name}* masih aktif. Summon baru akan *menimpa* boss ini dan menghapus ranking damage-nya, jadi harus pakai kata *force*.`
+      : '')
+  );
+}
+
 let handler = async (m, { args, isOwner, sock }) => {
   const player = getPlayer(m.sender);
   if (!player) return m.reply(`❌ Daftar dulu: *!register <nama> <class>*`);
@@ -18,14 +47,17 @@ let handler = async (m, { args, isOwner, sock }) => {
 
   // ── !boss status ───────────────────────────────────────────────────────────
   if (sub === 'status' || sub === 'info' || !args.length) {
-    const state = getWorldBossState();
+    const state      = getWorldBossState();
+    const ownerPanel = isOwner ? renderOwnerPanel(state) : '';
+
     if (!state || state.defeated) {
       return m.reply(
         `🌍 *World Boss*\n\n` +
         `😴 Saat ini tidak ada World Boss yang aktif.\n\n` +
         `World Boss muncul secara terjadwal atau di-spawn oleh owner.\n\n` +
         `📖 *Boss yang pernah ada:*\n` +
-        Object.values(WORLD_BOSSES).map(b => `${b.emoji} *${b.name}*\n   ${b.description}`).join('\n\n')
+        Object.values(WORLD_BOSSES).map(b => `${b.emoji} *${b.name}*\n   ${b.description}`).join('\n\n') +
+        ownerPanel
       );
     }
 
@@ -47,7 +79,8 @@ let handler = async (m, { args, isOwner, sock }) => {
       (ranking.length
         ? ranking.map((r, i) => `${['🥇','🥈','🥉','4️⃣','5️⃣'][i]} ${r.name}: *${r.dmg.toLocaleString()}* dmg`).join('\n')
         : '_Belum ada_') +
-      `\n\n⚔️ Serang dengan *!boss attack* (cooldown 5 menit)`
+      `\n\n⚔️ Serang dengan *!boss attack* (cooldown 5 menit)` +
+      ownerPanel
     );
   }
 
@@ -59,6 +92,7 @@ let handler = async (m, { args, isOwner, sock }) => {
     if (!state || state.defeated) return m.reply(`❌ Tidak ada World Boss aktif. Tunggu spawn berikutnya!`);
 
     try {
+      // Cooldown serang 5 menit dicek di dalam attackWorldBoss()
       const result = await attackWorldBoss(player, state);
       const boss   = WORLD_BOSSES[state.bossId];
 
@@ -130,13 +164,25 @@ let handler = async (m, { args, isOwner, sock }) => {
     );
   }
 
-  // ── !boss spawn (owner only) ───────────────────────────────────────────────
+  // ── !boss spawn <id> [force] (owner only) ──────────────────────────────────
   if (sub === 'spawn') {
     if (!isOwner) return m.reply(`❌ Owner only.`);
+
     const bossId = args[1] || 'demon_king';
     if (!WORLD_BOSSES[bossId]) {
       return m.reply(`❌ Boss tidak valid. Pilihan:\n${Object.keys(WORLD_BOSSES).join(', ')}`);
     }
+
+    // Cegah boss aktif tertimpa tanpa sengaja
+    const current = getWorldBossState();
+    const active  = current && !current.defeated && Date.now() < current.expiresAt;
+    if (active && args[2]?.toLowerCase() !== 'force') {
+      return m.reply(
+        `⚠️ *${current.name}* masih aktif. Summon baru akan menimpanya dan menghapus ranking damage.\n\n` +
+        `Lanjutkan dengan: *!boss spawn ${bossId} force*`
+      );
+    }
+
     const state = await spawnWorldBoss(bossId);
     const boss  = WORLD_BOSSES[bossId];
     return m.reply(
@@ -145,7 +191,7 @@ let handler = async (m, { args, isOwner, sock }) => {
       `"${boss.description}"\n\n` +
       `❤️ HP: ${state.maxHp.toLocaleString()}\n` +
       `⚔️ ATK: ${boss.attack} | 🛡️ DEF: ${boss.defense}\n` +
-      `⏳ Waktu: 24 jam\n\n` +
+      `⏳ Waktu: ${Math.round(boss.spawnDuration / 3600000)} jam\n\n` +
       `⚔️ Serang dengan *!boss attack*!\n` +
       `Semua player bisa ikut menyerang!`
     );
@@ -163,5 +209,5 @@ let handler = async (m, { args, isOwner, sock }) => {
 handler.help    = ['boss', 'boss attack', 'boss rank'];
 handler.tags    = ['rpg'];
 handler.command = /^(boss|worldboss|wb)$/i;
-handler.cooldown = 300;
+handler.cooldown = 5;   // cooldown command umum: 5 detik (serang boss tetap 5 menit, lihat attackWorldBoss)
 export default handler;
