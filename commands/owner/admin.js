@@ -1,6 +1,8 @@
 /**
  * commands/owner/admin.js
  * Owner-only admin commands.
+ * 
+ * ✅ FIX: addgold sekarang support "self" untuk nambah gold ke diri sendiri
  */
 
 import {
@@ -19,7 +21,7 @@ function getMentionedJid(m) {
 
 let handler = async (m, { args, command, sock }) => {
 
-  // ── !event <id> ────────────────────────────────────────────────────────────
+  // ── !event <id> ────────────────────────────────────────────────────────[...]
   if (command === 'event') {
     const eventId = args[0];
     if (!eventId) {
@@ -38,19 +40,19 @@ let handler = async (m, { args, command, sock }) => {
     return m.reply(`✅ World event: ${event.emoji} *${event.name}*\nDurasi: ${event.duration} menit`);
   }
 
-  // ── !reseteconomy ──────────────────────────────────────────────────────────
+  // ── !reseteconomy ──────────────────────────────────────────────────────[...]
   if (command === 'reseteconomy') {
     await saveEconomy(buildInitialEconomy());
     return m.reply(`✅ Economy direset ke harga dasar.`);
   }
 
-  // ── !ecotick ──────────────────────────────────────────────────────────────
+  // ── !ecotick ───────────────────────────────────────────────────────────[...]
   if (command === 'ecotick') {
     const changed = await economyTick();
     return m.reply(`✅ Economy tick. *${changed}* harga diupdate.`);
   }
 
-  // ── !broadcast <msg> ──────────────────────────────────────────────────────
+  // ── !broadcast <msg> ───────────────────────────────────────────────────[...]
   if (command === 'broadcast') {
     const msg = args.join(' ');
     if (!msg) return m.reply(`Usage: *!broadcast <pesan>*`);
@@ -65,19 +67,40 @@ let handler = async (m, { args, command, sock }) => {
     return m.reply(`✅ Broadcast terkirim ke *${sent}* player.`);
   }
 
-  // ── !addgold @user <jml> ──────────────────────────────────────────────────
+  // ── !addgold @user <jml> | !addgold self <jml> ─────────────────────────
+  // ✅ FIXED: Sekarang support "self" untuk nambah ke diri sendiri
   if (command === 'addgold') {
-    const targetJid = getMentionedJid(m);
-    const amount    = parseInt(args.find(a => !isNaN(a)));
-    if (!targetJid || !amount) return m.reply(`Usage: *!addgold @player <jumlah>*`);
+    let targetJid = getMentionedJid(m);
+    const firstArg = args[0]?.toLowerCase();
+    const amount = parseInt(args.find(a => !isNaN(a)));
+
+    // Jika args[0] adalah "self", target adalah owner/sender
+    if (firstArg === 'self') {
+      targetJid = m.sender;
+    }
+
+    if (!targetJid || !amount) {
+      return m.reply(
+        `Usage:\n` +
+        `• *!addgold @player <jumlah>* — nambah gold player lain\n` +
+        `• *!addgold self <jumlah>* — nambah gold sendiri`
+      );
+    }
+
     const target = getPlayer(targetJid);
     if (!target) return m.reply(`❌ Player tidak ditemukan. (${targetJid})`);
+    
     target.gold = (target.gold || 0) + amount;
     await savePlayer(target);
-    return m.reply(`✅ +${amount}g → *${target.name}*. Total: ${target.gold}g`);
+    
+    const isSelf = targetJid === m.sender;
+    const msg = isSelf
+      ? `✅ +${amount}g → *Kamu*. Total: ${target.gold}g`
+      : `✅ +${amount}g → *${target.name}*. Total: ${target.gold}g`;
+    return m.reply(msg);
   }
 
-  // ── !additem @user <item> <qty> ───────────────────────────────────────────
+  // ── !additem @user <item> <qty> ────────────────────────────────────────
   if (command === 'additem') {
     const targetJid = getMentionedJid(m);
     // Cari argumen non-angka yang bukan mention sebagai itemId
@@ -93,7 +116,7 @@ let handler = async (m, { args, command, sock }) => {
     return m.reply(`✅ *${item.name}* ×${qty} diberikan ke *${target.name}*`);
   }
 
-  // ── !setlevel @user <level> ───────────────────────────────────────────────
+  // ── !setlevel @user <level> ────────────────────────────────────────────
   if (command === 'setlevel') {
     const targetJid = getMentionedJid(m);
     const level     = parseInt(args.find(a => !isNaN(a)));
@@ -108,7 +131,7 @@ let handler = async (m, { args, command, sock }) => {
     return m.reply(`✅ Level *${target.name}* diset ke *${level}*`);
   }
 
-  // ── !players ───────────────────────────────────────────────────────────────
+  // ── !players ───────────────────────────────────────────────────────────[...]
   if (command === 'players') {
     const all = getAllPlayers();
     if (!all.length) return m.reply(`👥 Belum ada player terdaftar.`);
@@ -122,7 +145,7 @@ let handler = async (m, { args, command, sock }) => {
   return m.reply(`❓ Admin command tidak dikenal: *${command}*`);
 };
 
-handler.help      = ['event <id>', 'reseteconomy', 'ecotick', 'broadcast <msg>', 'addgold @p <jml>', 'additem @p <item>', 'setlevel @p <lvl>', 'players'];
+handler.help      = ['event <id>', 'reseteconomy', 'ecotick', 'broadcast <msg>', 'addgold @p <jml>', 'addgold self <jml>', 'additem @p <item>', 'setlevel @p <lvl>', 'players'];
 handler.tags      = ['owner'];
 handler.command   = /^(event|reseteconomy|ecotick|broadcast|addgold|additem|setlevel|players)$/i;
 handler.ownerOnly = true;
