@@ -277,6 +277,8 @@ const TAG_COLOR = {
 };
 
 function logCommand({ sender, chat, command, args, tag, isGroup, success, ms, errMsg }) {
+  // Downloader arguments can contain private signed URLs and user identifiers.
+  if (command === 'download') return;
   const time    = new Date().toTimeString().slice(0,8);
   const who     = displayNum(sender);
   const where   = isGroup ? `[G:${displayNum(chat)}]` : '[DM]';
@@ -357,6 +359,12 @@ export async function routeMessage(sock, m) {
     logCommand({ sender: m.sender, chat: m.chat, command, args, tag, isGroup: m.isGroup, success: true, ms });
   } catch (err) {
     const ms = Date.now() - start;
+    if (command === 'download') {
+      void Promise.resolve()
+        .then(() => sock.sendMessage(m.chat, { text: '❌ File tidak bisa diambil. Cek apakah tautannya masih aktif dan dapat diakses.' }))
+        .catch(() => {});
+      return;
+    }
     logCommand({ sender: m.sender, chat: m.chat, command, args, tag, isGroup: m.isGroup, success: false, ms, errMsg: err.message });
     logger.error({ command, sender: m.sender, err: err.message, stack: err.stack }, 'Command error');
     await sock.sendMessage(m.chat, { text: `❌ Error: ${err.message}` });
