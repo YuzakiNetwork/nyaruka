@@ -32,10 +32,9 @@ const HISTORY_MAX = 144;           // simpan 144 tick = 24 jam
 const MAX_CATCHUP = 144;           // maks tick yang dikejar sekaligus (24 jam)
 
 // ── Konfigurasi koin ──────────────────────────────────────────────────────────
-//  CATATAN: key internal ('guracoin', 'winzzcoin') SENGAJA tidak diganti.
-//  Key ini dipakai untuk menyimpan data pasar dan dompet pemain di database.
-//  Kalau diganti, saldo koin pemain yang sudah ada akan "hilang". Yang diganti
-//  hanya nama tampilan, simbol, dan alias.
+//  CATATAN: key koin ('sharkcoin', 'harucoin') dipakai untuk menyimpan data pasar
+//  dan dompet pemain di database. Jangan diganti lagi setelah bot berjalan.
+//  Data koin lama (guracoin, winzzcoin) dihapus otomatis, lihat LEGACY_COIN_KEYS.
 //
 //  start       : harga awal saat pasar pertama kali dibuat
 //  mean        : harga "rata-rata jangka panjang" (harga cenderung tertarik ke sini)
@@ -43,19 +42,22 @@ const MAX_CATCHUP = 144;           // maks tick yang dikejar sekaligus (24 jam)
 //  vol         : volatilitas normal per tick (0.08 = sekitar ±8%)
 //  eventChance : peluang lonjakan/anjlok mendadak per tick
 const COINS = {
-  guracoin: {
+  sharkcoin: {
     name: 'Sharkcoin', symbol: 'SHARK', emoji: '🦈',
     aliases: ['shark', 'sc', 'sharkcoin'],
     start: 400, mean: 500, reversion: 0.030, vol: 0.08, eventChance: 0.04,
     desc: 'Relatif stabil, cocok untuk trader santai.',
   },
-  winzzcoin: {
+  harucoin: {
     name: 'Harucoin', symbol: 'HARU', emoji: '🚀',
     aliases: ['haru', 'hc', 'harucoin'],
     start: 250, mean: 400, reversion: 0.025, vol: 0.15, eventChance: 0.07,
     desc: 'Sangat liar. Untung besar atau rugi besar!',
   },
 };
+
+// Key koin lama yang dihapus dari pasar & dompet pemain secara otomatis
+const LEGACY_COIN_KEYS = ['guracoin', 'winzzcoin'];
 
 // ── Menu (muncul di bawah setiap balasan) ─────────────────────────────────────
 const MENU =
@@ -173,6 +175,9 @@ async function getMarket() {
     dirty = true;
   }
   if (!mk.coins) { mk.coins = {}; dirty = true; }
+  for (const old of LEGACY_COIN_KEYS) {
+    if (mk.coins[old]) { delete mk.coins[old]; dirty = true; }
+  }
   for (const [key, cfg] of Object.entries(COINS)) {
     if (!mk.coins[key]) { mk.coins[key] = newCoinState(cfg); dirty = true; }
   }
@@ -203,6 +208,7 @@ function getWallet(player) {
   const w = player.crypto;
   w.realizedPnl = w.realizedPnl || 0;
   w.trades      = w.trades      || 0;
+  for (const old of LEGACY_COIN_KEYS) delete w[old];
   for (const key of Object.keys(COINS)) {
     if (!w[key]) w[key] = { qty: 0, cost: 0 };
   }
