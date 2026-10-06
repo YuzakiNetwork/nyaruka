@@ -12,13 +12,15 @@
  *  - Memakai effectiveStats + passive Awakening
  *  - Tidak bisa duel saat sedang di dungeon
  *  - Cooldown per pasangan untuk mencegah farming EXP
+ *  - ✅ BONUS EQUIPMENT SEKARANG DIHITUNG (FIX)
  */
 
 import { getPlayer, savePlayer, awardExp, effectiveStats } from '../../lib/game/player.js';
+import { ITEMS } from '../../lib/game/item.js';
 import { chance, applyVariance }                          from '../../lib/utils/random.js';
 import { normalizeJid }                                   from '../../handler/index.js';
 
-// ── Konfigurasi ───────────────────────────────────────────────────────────────
+// ── Konfigurasi ──────────────────────────────────────────────────────────[...]
 const DUEL_EXPIRE   = 60_000;       // tantangan berlaku 60 detik
 const PAIR_COOLDOWN = 5 * 60_000;   // pasangan yang sama baru bisa duel lagi setelah 5 menit
 const MAX_TURNS     = 15;
@@ -29,7 +31,7 @@ const pendingDuels = new Map();
 // "idA|idB" (terurut) -> timestamp duel terakhir
 const pairCooldowns = new Map();
 
-// ── Helper ────────────────────────────────────────────────────────────────────
+// ── Helper ───────────────────────────────────────────────────────────[...]
 const calcBet = (player) => Math.min(50 + (player.level || 1) * 10, 500);
 const pairKey = (a, b) => [a, b].sort().join('|');
 
@@ -39,10 +41,9 @@ function clearPending(challengerId) {
   pendingDuels.delete(challengerId);
 }
 
-function makeFighter(player) {
-  // itemLib tidak di-pass, jadi hanya stat dasar. Sambungkan itemLib bila ingin bonus equipment:
-  // effectiveStats(player, itemLib)
-  const st = effectiveStats(player);
+function makeFighter(player, itemLib) {
+  // ✅ FIXED: sekarang itemLib di-pass, stats bonus equipment dihitung
+  const st = effectiveStats(player, itemLib);
   return {
     ref:   player,
     name:  player.name,
@@ -56,10 +57,11 @@ function makeFighter(player) {
   };
 }
 
-// ── Simulasi ──────────────────────────────────────────────────────────────────
+// ── Simulasi ───────────────────────────────────────────────────────────[...]
 function simulateDuel(p1, p2) {
-  const f1 = makeFighter(p1);
-  const f2 = makeFighter(p2);
+  // ✅ FIXED: pass ITEMS ke makeFighter
+  const f1 = makeFighter(p1, ITEMS);
+  const f2 = makeFighter(p2, ITEMS);
   const order = f1.spd >= f2.spd ? [f1, f2] : [f2, f1];
   const log = [];
 
@@ -122,7 +124,7 @@ function simulateDuel(p1, p2) {
   return { log, winner };
 }
 
-// ── Handler ───────────────────────────────────────────────────────────────────
+// ── Handler ───────────────────────────────────────────────────────────[...]
 let handler = async (m, { args }) => {
   const player = getPlayer(m.sender);
   if (!player) return m.reply(`❌ Daftar dulu: *!register <nama> <class>*`);
@@ -138,7 +140,7 @@ let handler = async (m, { args }) => {
     if (Date.now() > d.expiresAt) clearPending(id);
   }
 
-  // ── accept ────────────────────────────────────────────────────────────────
+  // ── accept ──────────────────────────────────────────────────────────[...]
   if (sub === 'accept' || sub === 'terima') {
     const entries = [...pendingDuels.entries()].filter(([, d]) => d.targetId === m.sender);
     if (!entries.length) return m.reply(`❌ Tidak ada tantangan duel untukmu.`);
@@ -210,7 +212,7 @@ let handler = async (m, { args }) => {
     return m.reply(reply);
   }
 
-  // ── decline ───────────────────────────────────────────────────────────────
+  // ── decline ──────────────────────────────────────────────────────────[...]
   if (sub === 'decline' || sub === 'tolak') {
     const entries = [...pendingDuels.entries()].filter(([, d]) => d.targetId === m.sender);
     if (!entries.length) return m.reply(`❌ Tidak ada tantangan duel untukmu.`);
