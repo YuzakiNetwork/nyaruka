@@ -1,6 +1,6 @@
 /**
  * commands/rpg/coin.js
- * Sistem trading koin: Guracoin & Winzzcoin.
+ * Sistem trading koin: Sharkcoin & Harucoin.
  * Harga berubah otomatis tiap 10 menit (min 10g, maks 2000g per koin).
  *
  * Pemakaian:
@@ -32,6 +32,11 @@ const HISTORY_MAX = 144;           // simpan 144 tick = 24 jam
 const MAX_CATCHUP = 144;           // maks tick yang dikejar sekaligus (24 jam)
 
 // ── Konfigurasi koin ──────────────────────────────────────────────────────────
+//  CATATAN: key internal ('guracoin', 'winzzcoin') SENGAJA tidak diganti.
+//  Key ini dipakai untuk menyimpan data pasar dan dompet pemain di database.
+//  Kalau diganti, saldo koin pemain yang sudah ada akan "hilang". Yang diganti
+//  hanya nama tampilan, simbol, dan alias.
+//
 //  start       : harga awal saat pasar pertama kali dibuat
 //  mean        : harga "rata-rata jangka panjang" (harga cenderung tertarik ke sini)
 //  reversion   : kekuatan tarikan ke harga rata-rata per tick (0 = bebas liar)
@@ -39,14 +44,14 @@ const MAX_CATCHUP = 144;           // maks tick yang dikejar sekaligus (24 jam)
 //  eventChance : peluang lonjakan/anjlok mendadak per tick
 const COINS = {
   guracoin: {
-    name: 'Guracoin', symbol: 'GURA', emoji: '🦈',
-    aliases: ['gura', 'gc', 'guracoin'],
+    name: 'Sharkcoin', symbol: 'SHARK', emoji: '🦈',
+    aliases: ['shark', 'sc', 'sharkcoin'],
     start: 400, mean: 500, reversion: 0.030, vol: 0.08, eventChance: 0.04,
     desc: 'Relatif stabil, cocok untuk trader santai.',
   },
   winzzcoin: {
-    name: 'Winzzcoin', symbol: 'WINZZ', emoji: '🚀',
-    aliases: ['winzz', 'wc', 'winzzcoin'],
+    name: 'Harucoin', symbol: 'HARU', emoji: '🚀',
+    aliases: ['haru', 'hc', 'harucoin'],
     start: 250, mean: 400, reversion: 0.025, vol: 0.15, eventChance: 0.07,
     desc: 'Sangat liar. Untung besar atau rugi besar!',
   },
@@ -62,7 +67,7 @@ const MENU =
   `!coin jual <koin> <jumlah|all>\n` +
   `!coin dompet — portofolio & profit\n` +
   `!coin top — peringkat profit\n` +
-  `Koin: guracoin (gura), winzzcoin (winzz)`;
+  `Koin: sharkcoin (shark), harucoin (haru)`;
 
 // ── Util ──────────────────────────────────────────────────────────────────────
 const fmt   = (n) => Number(n || 0).toLocaleString('id-ID');
@@ -75,11 +80,16 @@ function gauss() {
   return (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;
 }
 
+/** Cocokkan input pemain (nama, simbol, atau alias) ke key internal koin. */
 function resolveCoin(str) {
   const s = String(str || '').toLowerCase().trim();
   if (!s) return null;
   for (const [key, cfg] of Object.entries(COINS)) {
-    if (key === s || cfg.symbol.toLowerCase() === s || cfg.aliases.includes(s)) return key;
+    if (
+      cfg.name.toLowerCase() === s ||
+      cfg.symbol.toLowerCase() === s ||
+      cfg.aliases.includes(s)
+    ) return key;
   }
   return null;
 }
@@ -280,7 +290,7 @@ let handler = async (m, { args }) => {
   if (['chart', 'grafik', 'graph'].includes(sub)) {
     if (args[1]) {
       const key = resolveCoin(args[1]);
-      if (!key) return reply(`❌ Koin tidak dikenal. Pilih: *guracoin* atau *winzzcoin*.`);
+      if (!key) return reply(`❌ Koin tidak dikenal. Pilih: *sharkcoin* atau *harucoin*.`);
       return reply(renderChart(mk, key));
     }
     return reply(Object.keys(COINS).map(k => renderChart(mk, k)).join('\n\n'));
@@ -289,7 +299,7 @@ let handler = async (m, { args }) => {
   // ── beli ──────────────────────────────────────────────────────────────────
   if (['beli', 'buy'].includes(sub)) {
     const key = resolveCoin(args[1]);
-    if (!key) return reply(`Usage: *!coin beli <koin> <jumlah|max>*\nContoh: !coin beli gura 10`);
+    if (!key) return reply(`Usage: *!coin beli <koin> <jumlah|max>*\nContoh: !coin beli shark 10`);
 
     const cfg   = COINS[key];
     const price = mk.coins[key].price;
@@ -342,7 +352,7 @@ let handler = async (m, { args }) => {
   // ── jual ──────────────────────────────────────────────────────────────────
   if (['jual', 'sell'].includes(sub)) {
     const key = resolveCoin(args[1]);
-    if (!key) return reply(`Usage: *!coin jual <koin> <jumlah|all>*\nContoh: !coin jual gura all`);
+    if (!key) return reply(`Usage: *!coin jual <koin> <jumlah|all>*\nContoh: !coin jual shark all`);
 
     const cfg   = COINS[key];
     const price = mk.coins[key].price;
