@@ -70,5 +70,6 @@ handler.help    = ['shop [page]'];
 handler.tags    = ['economy'];
 handler.command = /^shop$/i;
 handler.cooldown = config.cooldowns.shop;
+handler.owner = true;
 
 export default handler;
