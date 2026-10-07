@@ -11,7 +11,7 @@ let handler = async (m, { args, command }) => {
   const player = getPlayer(m.sender);
   if (!player) return m.reply(`❌ Register first: *!register <n> <class>*`);
 
-  // ── USE ITEM ──────────────────────────────────────────────────────────────
+  // ── USE ITEM ──────────────────────────────────────────────────────────
   if (command === 'use') {
     const itemId = args[0];
     if (!itemId) return m.reply(`Usage: *!use <item_id>*\nExample: *!use health_potion*`);
@@ -57,7 +57,7 @@ let handler = async (m, { args, command }) => {
   const lines = player.inventory.map(slot => {
     const item  = getItem(slot.itemId);
     if (!item) return `  ❓ Unknown: ${slot.itemId} x${slot.qty}`;
-    const emoji = RARITY_EMOJI[item.rarity] || '⬜';
+    const emoji = item.emoji || RARITY_EMOJI[item.rarity] || '⬜';
     const equip = Object.values(player.equipment).includes(slot.itemId) ? ' *(equipped)*' : '';
     return `  ${emoji} *${item.name}* x${slot.qty}${equip}`;
   });
