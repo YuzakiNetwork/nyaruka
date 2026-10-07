@@ -69,6 +69,6 @@ let handler = async (m, { args }) => {
 handler.help    = ['shop [page]'];
 handler.tags    = ['economy'];
 handler.cooldown = config.cooldowns.shop;
-handler.owner = true;
+handler.ownerOnly = true;
 
 export default handler;
