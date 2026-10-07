@@ -46,7 +46,7 @@ let handler = async (m, { args }) => {
       const serial = getItemSerial(slot.itemId);
       const slotType = SLOT_MAP[item.type];
       const isEquipped = player.equipment[slotType] === item.id ? ' ✅' : '';
-      const emoji = RARITY_EMOJI[item.rarity] || '⬜';
+      const emoji = item.emoji || RARITY_EMOJI[item.rarity] || '⬜';
       const stats = formatItemStats(item);
       return `  ${serial} | ${emoji} *${item.name}* [${item.rarity}]${isEquipped}\n      └─ ${stats}`;
     });
@@ -92,13 +92,15 @@ let handler = async (m, { args }) => {
   await savePlayer(player);
 
   const stats = formatItemStats(item);
-  let response = `✅ Equipped *${item.name}* (${serialInput})!\n`;
+  const itemEmoji = item.emoji || RARITY_EMOJI[item.rarity] || '⬜';
+  let response = `${itemEmoji} ✅ Equipped *${item.name}* (${serialInput})!\n`;
   response += `Slot: *${slot}*\n`;
   response += `Stats: ${stats}`;
 
   if (current) {
     const prevItem = getItem(current);
-    response += `\n(Replaced: *${prevItem?.name || current}*)`;
+    const prevEmoji = prevItem?.emoji || RARITY_EMOJI[prevItem?.rarity] || '⬜';
+    response += `\n(Replaced: ${prevEmoji} *${prevItem?.name || current}*)`;
   }
 
   return m.reply(response);
